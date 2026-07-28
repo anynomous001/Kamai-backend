@@ -79,14 +79,11 @@ enum PaymentMode {
 
 // ── Baker ────────────────────────────────────────────────────
 // Core identity for every Kamai baker account.
-// Created on first Firebase Phone Auth login.
+// Created on first email OTP verification (see ADR-009).
 // Profile fields (businessName, etc.) are populated during
 // the onboarding flow after initial login.
 model Baker {
   id                 String             @id @default(uuid())
-
-  // Legacy identity — optional for pure email auth accounts
-  firebaseUid        String?            @unique
 
   // Contact & Login info
   phoneNumber        String?
@@ -339,6 +336,33 @@ model EmailVerification {
 
   @@index([email, createdAt])
   @@index([email, expiresAt])
+}
+
+// ── AuditLog ─────────────────────────────────────────────────
+// Durable, append-only security & activity audit trail.
+// Replaces the previous NoOpAuditService stub — every
+// auditService.logEvent() call in the auth flow (and beyond)
+// is now persisted here for investigation of OTP abuse,
+// failed logins, and refresh-token reuse/theft events.
+model AuditLog {
+  id        String   @id @default(uuid())
+
+  // e.g. EMAIL_OTP_SENT, EMAIL_OTP_VERIFICATION_SUCCESS,
+  //      REFRESH_TOKEN_REUSE_DETECTED, USER_LOGGED_OUT
+  action    String
+
+  // Free-form subject of the event — bakerId, verification record id,
+  // or email, depending on the call site. Kept generic to match the
+  // existing AuditService.logEvent(action, entityId, metadata) contract.
+  entityId  String
+
+  // Structured event context (email, ip, userAgent, sessionId, etc.)
+  metadata  Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([action, createdAt])
+  @@index([entityId, createdAt])
 }
 
 

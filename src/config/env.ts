@@ -43,13 +43,6 @@ const envSchema = z.object({
     .string()
     .min(32, 'COOKIE_SECRET must be at least 32 characters'),
 
-  // Firebase Admin SDK
-  FIREBASE_PROJECT_ID: z.string().min(1, 'FIREBASE_PROJECT_ID is required'),
-  FIREBASE_CLIENT_EMAIL: z
-    .string()
-    .email('FIREBASE_CLIENT_EMAIL must be a valid email address'),
-  FIREBASE_PRIVATE_KEY: z.string().min(1, 'FIREBASE_PRIVATE_KEY is required'),
-
   // Redis
   REDIS_URL: z.string().optional(),
 

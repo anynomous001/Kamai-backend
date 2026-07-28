@@ -11,7 +11,6 @@ describe('Action 22 E2E: Baker Profile & Settings', () => {
     await prisma.baker.create({
       data: {
         id: 'test-baker-id',
-        firebaseUid: 'test-fb-baker-id',
         phoneNumber: '+919999999999',
         businessName: 'Profile Test Bakery',
         ownerName: 'Alice Profile',

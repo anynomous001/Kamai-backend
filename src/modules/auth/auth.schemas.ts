@@ -165,6 +165,41 @@ export const verifyEmailOtpJsonSchema = {
   },
 };
 
+export const refreshJsonSchema = {
+  description:
+    'Rotate the current refresh token for a new access + refresh token pair. ' +
+    'Reads the kamai_refresh_token HttpOnly cookie; does not require a valid access token. ' +
+    'A rotated-out (already-used) refresh token being replayed is treated as reuse/theft and ' +
+    'revokes every active session for the baker.',
+  tags: ['Auth'],
+  response: {
+    200: {
+      description: 'Session refreshed successfully. New Kamai session cookies are set.',
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+        bakerId: { type: 'string', format: 'uuid', example: 'd3b07384-d113-460a-85d1-d227446543b5' },
+        message: { type: 'string', example: 'Session refreshed successfully.' },
+      },
+    },
+    401: {
+      description:
+        'Refresh token missing, invalid, expired, or reuse of an already-rotated token was detected ' +
+        '(all sessions for the baker have been revoked in that case).',
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'This session is no longer valid. Please sign in again.' },
+        errorCode: {
+          type: 'string',
+          enum: ['REFRESH_TOKEN_INVALID', 'REFRESH_TOKEN_EXPIRED'],
+          example: 'REFRESH_TOKEN_INVALID',
+        },
+      },
+    },
+  },
+};
+
 export const logoutJsonSchema = {
   description: 'Revoke the current Kamai application session and clear auth cookies.',
   tags: ['Auth'],
