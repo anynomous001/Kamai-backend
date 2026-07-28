@@ -1,0 +1,68 @@
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { buildApp } from '../src/app.js';
+import { prisma } from '../src/shared/database/prisma.js';
+
+describe('Action 10 E2E: Cancel / Archive Order', () => {
+  let app: any;
+
+  beforeAll(async () => {
+    app = await buildApp();
+    await prisma.baker.deleteMany({ where: { id: 'test-baker-id' } });
+    await prisma.baker.create({
+      data: {
+        id: 'test-baker-id',
+        firebaseUid: 'test-fb-baker-id',
+        phoneNumber: '+919999999999',
+        businessName: 'Test Bakery',
+        ownerName: 'Test Owner',
+        status: 'ACTIVE',
+        subscriptionStatus: 'ACTIVE',
+      }
+    });
+
+    await prisma.order.create({
+      data: {
+        orderNumber: 'ORD-DEL-001',
+        baker: { connect: { id: 'test-baker-id' } },
+        category: 'Cake',
+        weight: '1kg',
+        flavour: 'Mango',
+        deliveryDate: new Date(),
+        totalPrice: 100000,
+        advancePaid: 0,
+        balanceDue: 100000,
+        customer: {
+          create: {
+            bakerId: 'test-baker-id',
+            name: 'Cancel Cust',
+            phone: '+919999999998',
+          },
+        },
+      },
+    });
+  });
+
+  afterAll(async () => {
+    await prisma.baker.deleteMany({
+      where: { id: 'test-baker-id' },
+    });
+  });
+
+  it('should successfully cancel/archive the order and set terminal status', async () => {
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/api/orders/ORD-DEL-001',
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body);
+    expect(body.success).toBe(true);
+    expect(body.data.status).toBe('CANCELLED');
+
+    // Confirm it is soft-deleted
+    const order = await prisma.order.findUnique({
+      where: { orderNumber: 'ORD-DEL-001' },
+    });
+    expect(order?.deletedAt).not.toBeNull();
+  });
+});

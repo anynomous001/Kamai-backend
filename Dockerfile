@@ -1,0 +1,58 @@
+# ============================================================
+# Kamai Backend — Dockerfile
+# Multi-stage build for production-grade image
+# ============================================================
+
+# ── Stage 1: Dependencies ─────────────────────────────────────
+FROM node:22-alpine AS deps
+
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
+WORKDIR /app
+
+COPY package.json pnpm-lock.yaml* ./
+COPY prisma ./prisma/
+
+RUN pnpm install --frozen-lockfile --prod=false
+
+# ── Stage 2: Builder ─────────────────────────────────────────
+FROM node:22-alpine AS builder
+
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
+WORKDIR /app
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+
+RUN pnpm run build
+
+# ── Stage 3: Production ───────────────────────────────────────
+FROM node:22-alpine AS production
+
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+# Create non-root user
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 fastify
+
+COPY package.json pnpm-lock.yaml* ./
+COPY prisma ./prisma/
+
+RUN pnpm install --frozen-lockfile --prod && \
+    pnpm run db:generate
+
+COPY --from=builder /app/dist ./dist
+
+USER fastify
+
+EXPOSE 3001
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget -qO- http://localhost:3001/health || exit 1
+
+CMD ["node", "dist/main.js"]

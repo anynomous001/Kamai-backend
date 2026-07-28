@@ -1,0 +1,344 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum BakerStatus {
+  PENDING_ONBOARDING
+  ACTIVE
+  SUSPENDED
+}
+
+enum WebhookProcessingStatus {
+  SUCCESS
+  FAILED
+}
+
+enum CollectionMethod {
+  UPI
+  QR
+}
+
+
+
+enum SubscriptionStatus {
+  TRIAL
+  PENDING
+  ACTIVE
+  PAUSED
+  CANCELLED
+  EXPIRED
+}
+
+enum SubscriptionPlan {
+  EARLY_ADOPTER
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  IN_PROGRESS
+  READY
+  DELIVERED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PARTIALLY_PAID
+  PAID
+}
+
+enum TransactionType {
+  CREDIT
+  DEBIT
+}
+
+enum PaymentMode {
+  CASH
+  UPI
+  CARD
+  BANK_TRANSFER
+}
+
+// ============================================================
+// MODELS
+// ============================================================
+
+// ── Baker ────────────────────────────────────────────────────
+// Core identity for every Kamai baker account.
+// Created on first Firebase Phone Auth login.
+// Profile fields (businessName, etc.) are populated during
+// the onboarding flow after initial login.
+model Baker {
+  id                 String             @id @default(uuid())
+
+  // Legacy identity — optional for pure email auth accounts
+  firebaseUid        String?            @unique
+
+  // Contact & Login info
+  phoneNumber        String?
+  email              String?            @unique
+
+  subscriptionStatus SubscriptionStatus @default(TRIAL)
+
+  // Profile fields — nullable until onboarding is completed
+  businessName       String?
+  ownerName          String?
+  logoPath           String?
+  fssaiNumber        String?
+  fssaiDocumentPath  String?
+  address            String?
+  gstNumber          String?
+  isVerified         Boolean             @default(false)
+  status             BakerStatus         @default(PENDING_ONBOARDING)
+
+  // Payment Settings
+  upiId                    String?
+  merchantName             String?
+  preferredApps            String[]            @default([])
+  defaultCollectionMethod  CollectionMethod    @default(UPI)
+  dynamicQrEnabled         Boolean             @default(true)
+
+  // Billing & Subscription
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  trialStartDate     DateTime?
+  trialEndDate       DateTime?
+  razorpaySubscriptionId String? @unique
+  razorpayPlanId     String?
+  nextBillingDate    DateTime?
+  subscriptionPlan   SubscriptionPlan?
+
+  refreshTokens      RefreshToken[]
+  orders             Order[]
+  customers          Customer[]
+  paymentLedgers     PaymentLedger[]
+  investments        Investment[]
+  billingHistory     BillingHistory[]
+
+  @@index([email])
+  @@index([phoneNumber])
+  @@index([subscriptionStatus])
+  @@index([trialEndDate])
+  @@index([upiId])
+}
+
+// ── RefreshToken ──────────────────────────────────────────────
+// Stores the SHA-256 hash of each issued refresh token.
+// Raw token is never persisted.
+// sessionId = RefreshToken.id (referenced inside JWT payload).
+model RefreshToken {
+  id        String    @id @default(uuid())
+
+  // SHA-256 hash of the raw refresh token JWT
+  tokenHash String    @unique
+
+  bakerId   String
+  baker     Baker     @relation(fields: [bakerId], references: [id], onDelete: Cascade)
+
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+
+  // Non-null = revoked (e.g. logout, rotation)
+  revokedAt DateTime?
+
+  @@index([bakerId])
+}
+
+// ── Customer ────────────────────────────────────────────────────
+model Customer {
+  id        String   @id @default(uuid())
+  
+  bakerId   String
+  baker     Baker    @relation(fields: [bakerId], references: [id], onDelete: Cascade)
+  
+  name      String
+  phone     String
+  address   String?
+  notes     String?
+  preferredDeliveryTime String?
+  
+  totalOrders   Int       @default(0)
+  lifetimeValue Int       @default(0)
+  lastOrderDate DateTime?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  orders    Order[]
+
+  @@unique([bakerId, phone])
+  @@index([bakerId])
+  @@index([phone])
+  @@index([bakerId, name])
+  @@index([bakerId, phone])
+  @@index([lastOrderDate])
+}
+
+// ── Order ─────────────────────────────────────────────────────
+model Order {
+  id             String      @id @default(uuid())
+  orderNumber    String      @unique // e.g. ORD-20260726-00001
+  
+  bakerId        String
+  baker          Baker       @relation(fields: [bakerId], references: [id], onDelete: Cascade)
+  
+  customerId     String
+  customer       Customer    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  
+  category       String
+  weight         String
+  flavour        String
+  referencePhoto String?
+  
+  deliveryDate   DateTime
+  status         OrderStatus @default(PENDING)
+  
+  // Stored as integer representing smallest currency unit (e.g. paise)
+  totalPrice     Int
+  advancePaid    Int
+  balanceDue     Int
+  
+  paymentStatus  PaymentStatus @default(UNPAID)
+  
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  deletedAt      DateTime?
+  
+  paymentLedgers PaymentLedger[]
+  
+  @@index([bakerId])
+  @@index([customerId])
+  @@index([deliveryDate])
+  @@index([status])
+  @@index([orderNumber])
+  
+  // Compound indexes for Action 5 Order History optimizations
+  @@index([bakerId, status])
+  @@index([bakerId, deliveryDate])
+  @@index([bakerId, createdAt])
+  
+  // CRM Aggregation optimizations
+  @@index([customerId, status])
+  @@index([customerId, deliveryDate])
+  @@index([customerId, balanceDue])
+  @@index([customerId, createdAt])
+  @@index([bakerId, orderNumber])
+}
+
+// ── PaymentLedger ──────────────────────────────────────────────
+model PaymentLedger {
+  id                   String          @id @default(uuid())
+  
+  bakerId              String
+  baker                Baker           @relation(fields: [bakerId], references: [id], onDelete: Cascade)
+  
+  orderId              String?
+  order                Order?          @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  
+  orderNumber          String?
+  
+  amount               Int
+  type                 TransactionType
+  paymentMode          PaymentMode
+  transactionReference String?
+  
+  transactionDate      DateTime        @default(now())
+  createdAt            DateTime        @default(now())
+  
+  @@index([bakerId, transactionDate])
+  @@index([orderId])
+}
+
+// ── Investment ──────────────────────────────────────────────
+model Investment {
+  id              String    @id @default(uuid())
+  
+  bakerId         String
+  baker           Baker     @relation(fields: [bakerId], references: [id], onDelete: Cascade)
+  
+  materialName    String
+  quantity        Decimal
+  unit            String
+  pricePerUnit    Int
+  totalCost       Int
+  supplier        String?
+  
+  purchaseDate    DateTime
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  @@index([bakerId, purchaseDate])
+  @@index([bakerId, materialName])
+  @@index([purchaseDate])
+}
+
+// ── WebhookEvent ──────────────────────────────────────────────
+// Idempotency table for Razorpay webhooks
+model WebhookEvent {
+  id           String                  @id @default(uuid())
+  eventId      String                  @unique
+  eventType    String
+  status       WebhookProcessingStatus
+  processedAt  DateTime                @default(now())
+  errorMessage String?
+}
+
+// ── BillingHistory ────────────────────────────────────────────
+// Immutable ledger of all subscription and billing events
+model BillingHistory {
+  id             String   @id @default(uuid())
+  bakerId        String
+  subscriptionId String
+  paymentId      String?
+  eventType      String
+  amount         Int
+  currency       String
+  status         String
+  processedAt    DateTime
+  createdAt      DateTime @default(now())
+
+  baker          Baker    @relation(fields: [bakerId], references: [id])
+
+  @@index([bakerId])
+  @@index([subscriptionId])
+  @@index([processedAt])
+}
+
+// ── EmailVerification ──────────────────────────────────────────
+// Stores hashed OTPs for email verification flow
+model EmailVerification {
+  id         String    @id @default(uuid())
+  email      String
+  otpHash    String
+  expiresAt  DateTime
+  attempts   Int       @default(0)
+  verifiedAt DateTime?
+  consumedAt DateTime?
+  lastSentAt DateTime?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([email, createdAt])
+  @@index([email, expiresAt])
+}
+
+
