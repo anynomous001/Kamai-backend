@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
+import { beforeAll, afterAll, afterEach, vi } from 'vitest';
 
 // ── Global Test Setup ──────────────────────────────────────────
 vi.stubEnv('NODE_ENV', 'test');
