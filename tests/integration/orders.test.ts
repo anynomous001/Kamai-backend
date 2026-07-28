@@ -6,13 +6,12 @@ import { v4 as uuidv4 } from 'uuid';
 
 describe('Integration Tests: Orders & Customers Modules', () => {
   let testBakerId: string;
-  const testFirebaseUid = `test-fb-${uuidv4()}`;
 
   beforeAll(async () => {
     // 1. Create a transient test baker record in the database
     const baker = await prisma.baker.create({
       data: {
-        firebaseUid: testFirebaseUid,
+        email: `test-${uuidv4()}@example.com`,
         phoneNumber: '+919999999999',
         businessName: 'Integration Test Bakery',
         ownerName: 'Integration Tester',

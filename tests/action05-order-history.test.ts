@@ -11,7 +11,6 @@ describe('Action 5 E2E: Order History', () => {
     await prisma.baker.create({
       data: {
         id: 'test-baker-id',
-        firebaseUid: 'test-fb-baker-id',
         phoneNumber: '+919999999999',
         businessName: 'Test Bakery',
         ownerName: 'Test Owner',

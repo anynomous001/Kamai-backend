@@ -1,4 +1,4 @@
-import { createHash, randomInt } from 'crypto';
+import { createHash, randomInt, timingSafeEqual } from 'crypto';
 import { VerificationRepository } from './verification.repository.js';
 import { emailService } from '../../shared/email/email.service.js';
 import { auditService } from '../../shared/audit/index.js';
@@ -33,11 +33,25 @@ export class OtpService {
   }
 
   /**
-   * Verifies an OTP against a stored hash.
+   * Verifies an OTP against a stored hash using a constant-time comparison.
+   *
+   * A plain `===` string comparison short-circuits on the first differing
+   * byte, which leaks timing information an attacker could use to guess
+   * the correct OTP one character at a time. `crypto.timingSafeEqual`
+   * compares the full buffers in constant time, closing that side channel.
    */
   static verifyOtpHash(otp: string, hash: string): boolean {
     const computedHash = this.hashOtp(otp);
-    return computedHash === hash;
+    const computedBuffer = Buffer.from(computedHash, 'hex');
+    const storedBuffer = Buffer.from(hash, 'hex');
+
+    // Buffers of unequal length are never valid SHA-256 digests here, and
+    // timingSafeEqual throws on length mismatch — guard defensively.
+    if (computedBuffer.length !== storedBuffer.length) {
+      return false;
+    }
+
+    return timingSafeEqual(computedBuffer, storedBuffer);
   }
 
   /**
@@ -88,8 +102,12 @@ export class OtpService {
     // 5. Send Verification Email via Resend
     await emailService.sendVerificationEmail(email, otp, 5);
 
-    // 6. Audit Log
-    await auditService.logEvent('EMAIL_OTP_SENT', record.id, { email });
+    // 6. Audit Log — capture ip/user-agent context for later abuse investigation
+    await auditService.logEvent('EMAIL_OTP_SENT', record.id, {
+      email,
+      ipAddress: options?.ipAddress,
+      userAgent: options?.userAgent,
+    });
 
     return {
       success: true,

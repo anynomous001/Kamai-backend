@@ -20,7 +20,7 @@ type TokenClaims = Omit<JwtPayload, 'iat' | 'exp'>;
 
 /**
  * Signs a short-lived Kamai access token (default 15m).
- * Payload: sub, firebaseUid, phoneNumber, sessionId.
+ * Payload: sub (Baker id), email, phoneNumber, sessionId.
  */
 export async function generateAccessToken(claims: TokenClaims): Promise<string> {
   return new SignJWT({
