@@ -6,6 +6,13 @@
 # ── Stage 1: Dependencies ─────────────────────────────────────
 FROM node:22-alpine AS deps
 
+# Without the `openssl` CLI present, Prisma's postinstall can't detect
+# the actual OpenSSL version on this image (Alpine 3.24 ships OpenSSL
+# 3.x/libssl.so.3 only) and silently guesses "openssl-1.1.x" instead —
+# a schema-engine binary that then fails to even load (missing
+# libssl.so.1.1) the moment anything runs `prisma migrate`/`db push`.
+RUN apk add --no-cache openssl
+
 RUN corepack enable && corepack prepare pnpm@9 --activate
 
 WORKDIR /app
@@ -29,6 +36,10 @@ RUN pnpm run build
 
 # ── Stage 3: Production ───────────────────────────────────────
 FROM node:22-alpine AS production
+
+# See the `deps` stage comment: needed for correct Prisma engine
+# auto-detection during this stage's own `pnpm install`.
+RUN apk add --no-cache openssl
 
 RUN corepack enable && corepack prepare pnpm@9 --activate
 
