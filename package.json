@@ -49,7 +49,6 @@
     "@prisma/client": "^5.17.0",
     "@sentry/node": "^8.24.0",
     "@supabase/supabase-js": "^2.110.8",
-    "argon2": "^0.31.2",
     "bullmq": "^5.12.12",
     "dotenv": "^17.4.2",
     "fastify": "^4.28.1",

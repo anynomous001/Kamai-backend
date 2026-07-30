@@ -43,8 +43,13 @@ RUN addgroup --system --gid 1001 nodejs && \
 COPY package.json pnpm-lock.yaml* ./
 COPY prisma ./prisma/
 
-RUN pnpm install --frozen-lockfile --prod && \
-    pnpm run db:generate
+# `prisma` (the CLI, needed to run `db:generate`/`prisma generate`
+# directly) is a devDependency and is intentionally excluded by --prod.
+# That's fine — @prisma/client's own postinstall script already generates
+# the client during this install step, using the correct locally-pinned
+# engine version. A separate `pnpm run db:generate` here would try to
+# invoke a `prisma` binary that was never installed in this stage.
+RUN pnpm install --frozen-lockfile --prod
 
 COPY --from=builder /app/dist ./dist
 
