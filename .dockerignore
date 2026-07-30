@@ -1,0 +1,27 @@
+# Environment variables — must never end up in any image layer
+.env
+.env.*
+!.env.example
+
+# Version control
+.git
+.gitignore
+
+# Dependencies — installed fresh inside each build stage
+node_modules
+
+# Build output — regenerated inside the build
+dist
+build
+
+# Local scratch / test artifacts
+coverage
+.vitest-cache
+*.log
+logs
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.vscode
+.idea
