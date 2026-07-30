@@ -1,5 +1,7 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
+
 import { InternalServerError, NotFoundError } from '../../shared/errors/index.js';
+
 import { ordersService } from './orders.service.js';
 import type { CreateOrderPayload } from './orders.schemas.js';
 

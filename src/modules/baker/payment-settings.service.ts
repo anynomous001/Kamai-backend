@@ -1,6 +1,7 @@
 import { prisma } from '../../shared/database/prisma.js';
 import { auditService } from '../../shared/audit/index.js';
 import { NotFoundError } from '../../shared/errors/index.js';
+
 import type { UpdateUpiSettingsBody } from './baker.schemas.js';
 
 export async function updateUpiSettings(bakerId: string, payload: UpdateUpiSettingsBody) {

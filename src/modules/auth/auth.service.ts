@@ -1,13 +1,17 @@
 import { createHash } from 'node:crypto';
+
 import type { Baker } from '@prisma/client';
+
 import { prisma } from '../../shared/database/prisma.js';
 import { ForbiddenError, UnauthorizedError } from '../../shared/errors/index.js';
 import { env } from '../../config/env.js';
+import { auditService } from '../../shared/audit/index.js';
+import type { JwtPayload } from '../../shared/types/index.js';
+
 import * as jwtService from './jwt.service.js';
 import { OtpService, type SendOtpResult } from './otp.service.js';
-import { auditService } from '../../shared/audit/index.js';
 import { TenantService } from './tenant.service.js';
-import type { JwtPayload } from '../../shared/types/index.js';
+
 
 // ── Session Creation ──────────────────────────────────────────
 

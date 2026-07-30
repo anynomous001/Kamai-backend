@@ -1,7 +1,9 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
+
+import { logger } from '../../shared/logger/index.js';
+
 import { razorpayWebhookProcessor } from './razorpay-webhook.processor.js';
 import { processWebhookEvent } from './webhooks.service.js';
-import { logger } from '../../shared/logger/index.js';
 
 export async function razorpayWebhookHandler(
   req: FastifyRequest,

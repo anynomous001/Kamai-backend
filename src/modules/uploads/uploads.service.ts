@@ -1,9 +1,11 @@
 import { v4 as uuidv4 } from 'uuid';
-import { UploadCategory } from './uploads.schemas.js';
+
 import { prisma } from '../../shared/database/prisma.js';
 import { auditService } from '../../shared/audit/index.js';
 import { storageProvider } from '../../shared/storage/supabase.storage.js';
 import { BadRequestError, NotFoundError } from '../../shared/errors/index.js';
+
+import { UploadCategory } from './uploads.schemas.js';
 
 const ALLOWED_MIME_TYPES: Record<UploadCategory, string[]> = {
   BUSINESS_LOGO: ['image/png', 'image/jpeg', 'image/webp'],
@@ -52,22 +54,29 @@ export async function confirmUpload(bakerId: string, filePath: string, category:
   // 2. Process transaction: Update baker profile and log audit
   const now = new Date();
   await prisma.$transaction(async (tx) => {
-    // Update Baker
-    const dataToUpdate: any = {};
+    // tx.baker.update() throws (P2025) rather than returning null when the
+    // record is missing, so existence must be checked beforehand to surface
+    // a NotFoundError instead of an unhandled Prisma error.
+    const existingBaker = await tx.baker.findUnique({
+      where: { id: bakerId },
+      select: { id: true },
+    });
+
+    if (!existingBaker) {
+      throw new NotFoundError('Baker not found');
+    }
+
+    const dataToUpdate: { logoPath?: string; fssaiDocumentPath?: string } = {};
     if (category === UploadCategory.BUSINESS_LOGO) {
       dataToUpdate.logoPath = filePath;
     } else if (category === UploadCategory.FSSAI_DOCUMENT) {
       dataToUpdate.fssaiDocumentPath = filePath;
     }
 
-    const baker = await tx.baker.update({
+    await tx.baker.update({
       where: { id: bakerId },
       data: dataToUpdate,
     });
-
-    if (!baker) {
-      throw new NotFoundError('Baker not found');
-    }
 
     // Audit log
     const eventType =

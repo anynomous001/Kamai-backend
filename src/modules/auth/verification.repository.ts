@@ -1,5 +1,6 @@
-import { prisma } from '../../shared/database/prisma.js';
 import type { EmailVerification } from '@prisma/client';
+
+import { prisma } from '../../shared/database/prisma.js';
 
 export class VerificationRepository {
   /**

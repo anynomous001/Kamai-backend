@@ -1,5 +1,6 @@
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+
 import { verifyAccessToken } from '../modules/auth/jwt.service.js';
 import { UnauthorizedError } from '../shared/errors/index.js';
 import { env } from '../config/env.js';

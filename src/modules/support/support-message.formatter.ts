@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+
 import type { SupportIssueType } from './support.schemas.js';
 
 interface BakerSupportDetails {

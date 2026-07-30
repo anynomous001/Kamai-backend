@@ -1,5 +1,7 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
+
 import { InternalServerError } from '../../shared/errors/index.js';
+
 import { createInvestment, getInvestments, deleteInvestment } from './investments.service.js';
 import type { CreateInvestmentBody, GetInvestmentsQuery } from './investments.schemas.js';
 

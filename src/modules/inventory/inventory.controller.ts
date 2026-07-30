@@ -1,5 +1,7 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
+
 import { InternalServerError } from '../../shared/errors/index.js';
+
 import { inventoryService } from './inventory.service.js';
 import type {
   CreateInventoryItemBody,

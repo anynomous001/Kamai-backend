@@ -1,4 +1,5 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
+
 import { updateUpiSettings } from './payment-settings.service.js';
 import { getBakerProfile, updateBakerProfile } from './baker-profile.service.js';
 import type { UpdateUpiSettingsBody, UpdateBakerProfileBody } from './baker.schemas.js';

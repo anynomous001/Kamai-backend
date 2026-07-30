@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+
 import { logout, refresh, sendEmailOtp, verifyEmailOtp } from './auth.controller.js';
 import {
   sendEmailOtpJsonSchema,

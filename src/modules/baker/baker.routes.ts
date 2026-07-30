@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+
 import { updateUpiSettingsHandler, getBakerProfileHandler, updateBakerProfileHandler } from './baker.controller.js';
 import { UpdateUpiSettingsSchema, GetBakerProfileSchema, UpdateBakerProfileSchema } from './baker.schemas.js';
 

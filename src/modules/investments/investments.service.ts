@@ -2,6 +2,7 @@ import { prisma } from '../../shared/database/prisma.js';
 import { auditService } from '../../shared/audit/index.js';
 import { cacheService } from '../../shared/cache/index.js';
 import { NotFoundError } from '../../shared/errors/index.js';
+
 import type { CreateInvestmentBody, GetInvestmentsQuery } from './investments.schemas.js';
 
 export async function createInvestment(bakerId: string, payload: CreateInvestmentBody) {

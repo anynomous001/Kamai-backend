@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+
 import { generateWhatsAppLinkHandler } from './notifications.controller.js';
 import { GenerateWhatsAppLinkSchema } from './notifications.schemas.js';
 

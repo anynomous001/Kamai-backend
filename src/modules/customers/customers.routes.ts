@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+
 import { getCustomers, getCustomerProfile, updateCustomer } from './customers.controller.js';
 import { getCustomersJsonSchema, getCustomerProfileJsonSchema, updateCustomerJsonSchema } from './customers.schemas.js';
 

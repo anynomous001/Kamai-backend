@@ -1,5 +1,7 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
+
 import { InternalServerError } from '../../shared/errors/index.js';
+
 import { getBillingStatus, createSubscription } from './billing.service.js';
 import type { CreateSubscriptionBody } from './billing.schemas.js';
 

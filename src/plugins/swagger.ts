@@ -1,6 +1,7 @@
 import fp from 'fastify-plugin';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
+
 import { env } from '../config/env.js';
 
 export const swaggerPlugin = fp(async (app) => {

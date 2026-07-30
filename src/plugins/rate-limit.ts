@@ -1,5 +1,6 @@
 import fp from 'fastify-plugin';
 import rateLimit from '@fastify/rate-limit';
+
 import { env } from '../config/env.js';
 
 export const rateLimitPlugin = fp(async (app) => {

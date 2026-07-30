@@ -237,7 +237,7 @@ export async function getCalendar(bakerId: string, query: import('./dashboard.sc
   }
 
   const daysArray: any[] = [];
-  let current = new Date(startDate);
+  const current = new Date(startDate);
   current.setUTCHours(0, 0, 0, 0);
 
   while (current <= endDate) {

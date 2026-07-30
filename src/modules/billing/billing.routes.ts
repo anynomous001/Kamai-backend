@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+
 import { getBillingStatusHandler, createSubscriptionHandler } from './billing.controller.js';
 import { getBillingStatusJsonSchema, createSubscriptionJsonSchema } from './billing.schemas.js';
 

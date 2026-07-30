@@ -1,6 +1,7 @@
 import fp from 'fastify-plugin';
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { ZodError } from 'zod';
+
 import { AppError } from '../shared/errors/index.js';
 import { logger } from '../shared/logger/index.js';
 import { env } from '../config/env.js';

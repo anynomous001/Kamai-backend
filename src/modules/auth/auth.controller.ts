@@ -1,9 +1,11 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
-import { SendEmailOtpBodySchema, VerifyEmailOtpBodySchema } from './auth.schemas.js';
-import * as authService from './auth.service.js';
+
 import { ValidationError, UnauthorizedError } from '../../shared/errors/index.js';
 import { auditService } from '../../shared/audit/index.js';
 import { env } from '../../config/env.js';
+
+import * as authService from './auth.service.js';
+import { SendEmailOtpBodySchema, VerifyEmailOtpBodySchema } from './auth.schemas.js';
 
 // ── Cookie Config ─────────────────────────────────────────────
 

@@ -1,4 +1,5 @@
 import type { Baker } from '@prisma/client';
+
 import { prisma } from '../../shared/database/prisma.js';
 
 // Amounts in rupees (the baker-ops schema stores money as numeric rupees,

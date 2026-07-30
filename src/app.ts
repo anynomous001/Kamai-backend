@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance } from 'fastify';
+
 import { env } from './config/env.js';
 
 // Plugins

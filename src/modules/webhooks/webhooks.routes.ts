@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import rawBody from 'fastify-raw-body';
+
 import { razorpayWebhookHandler } from './webhooks.controller.js';
 
 export async function webhooksRoutes(app: FastifyInstance) {

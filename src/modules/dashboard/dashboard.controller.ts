@@ -1,6 +1,8 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
-import { getDashboardSummary, getCalendar as getCalendarService } from './dashboard.service.js';
+
 import { InternalServerError } from '../../shared/errors/index.js';
+
+import { getDashboardSummary, getCalendar as getCalendarService } from './dashboard.service.js';
 
 export async function loadSummaryDashboard(
   req: FastifyRequest,

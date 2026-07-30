@@ -1,4 +1,5 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
+
 import { generateUploadUrl, confirmUpload } from './uploads.service.js';
 import type { GenerateUploadUrlBody, ConfirmUploadBody } from './uploads.schemas.js';
 

@@ -1,6 +1,32 @@
 import crypto from 'crypto';
+
+import { z } from 'zod';
+
 import { env } from '../../config/env.js';
+
 import type { WebhookProcessor } from './webhook.processor.interface.js';
+
+const razorpayWebhookPayloadSchema = z.object({
+  event: z.string(),
+  payload: z.object({
+    subscription: z
+      .object({
+        entity: z.object({
+          id: z.string(),
+        }),
+      })
+      .optional(),
+    payment: z
+      .object({
+        entity: z.object({
+          id: z.string(),
+          amount: z.number(),
+          currency: z.string(),
+        }),
+      })
+      .optional(),
+  }),
+});
 
 export class RazorpayWebhookProcessor implements WebhookProcessor {
   verifySignature(payload: string, signature: string): void {
@@ -19,30 +45,29 @@ export class RazorpayWebhookProcessor implements WebhookProcessor {
     }
   }
 
-  parseEvent(payload: string) {
-    const data = JSON.parse(payload);
-    
-    // The Razorpay event ID is often in the 'x-razorpay-event-id' header, 
-    // but here we are parsing the body. The processor will just extract what it can.
-    // Actually, Razorpay doesn't put event ID in the body, it's only in headers.
-    // Wait, let's extract the necessary entity info.
-    const eventType = data.event;
-    const subscriptionEntity = data.payload?.subscription?.entity;
-    const paymentEntity = data.payload?.payment?.entity;
+  parseEvent(payload: string): ReturnType<WebhookProcessor['parseEvent']> {
+    const parseResult = razorpayWebhookPayloadSchema.safeParse(JSON.parse(payload));
 
-    if (!subscriptionEntity || !subscriptionEntity.id) {
+    if (!parseResult.success) {
+      throw new Error('Invalid webhook payload: unexpected shape');
+    }
+
+    const data = parseResult.data;
+    const subscriptionEntity = data.payload.subscription?.entity;
+    const paymentEntity = data.payload.payment?.entity;
+
+    if (!subscriptionEntity) {
       throw new Error('Invalid webhook payload: missing subscription entity');
     }
 
     return {
-      // Event ID is passed from the controller via header, we'll just return what's in the payload.
-      // We will override eventId in the controller.
-      eventId: '', 
-      eventType,
+      // Event ID is passed from the controller via header; overridden there.
+      eventId: '',
+      eventType: data.event,
       subscriptionId: subscriptionEntity.id,
       paymentId: paymentEntity?.id,
       amount: paymentEntity?.amount, // in paise
-      currency: paymentEntity?.currency || 'INR',
+      currency: paymentEntity?.currency ?? 'INR',
     };
   }
 }

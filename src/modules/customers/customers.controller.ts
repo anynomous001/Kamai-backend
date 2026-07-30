@@ -1,5 +1,7 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
+
 import { InternalServerError } from '../../shared/errors/index.js';
+
 import { customersService } from './customers.service.js';
 
 export async function getCustomers(

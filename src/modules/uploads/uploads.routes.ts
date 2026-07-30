@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+
 import { generateUploadUrlHandler, confirmUploadHandler } from './uploads.controller.js';
 import { GenerateUploadUrlSchema, ConfirmUploadSchema } from './uploads.schemas.js';
 

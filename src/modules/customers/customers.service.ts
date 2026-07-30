@@ -1,7 +1,8 @@
+import type { Prisma } from '@prisma/client';
+
 import { prisma } from '../../shared/database/prisma.js';
 import { auditService } from '../../shared/audit/index.js';
 import { NotFoundError, ConflictError } from '../../shared/errors/index.js';
-import type { Prisma } from '@prisma/client';
 
 type CustomerListRow = {
   customerId: string;

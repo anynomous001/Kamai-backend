@@ -1,4 +1,5 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
+
 import { generateWhatsAppMessage } from './notifications.service.js';
 import type { GenerateWhatsAppLinkBody } from './notifications.schemas.js';
 

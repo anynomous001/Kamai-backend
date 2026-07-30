@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client';
+
 import { prisma } from '../database/prisma.js';
 import { logger } from '../logger/index.js';
 

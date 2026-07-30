@@ -1,8 +1,10 @@
 import { createHash, randomInt, timingSafeEqual } from 'crypto';
-import { VerificationRepository } from './verification.repository.js';
+
 import { emailService } from '../../shared/email/email.service.js';
 import { auditService } from '../../shared/audit/index.js';
 import { TooManyRequestsError, GoneError, UnauthorizedError } from '../../shared/errors/index.js';
+
+import { VerificationRepository } from './verification.repository.js';
 
 export interface SendOtpResult {
   success: boolean;

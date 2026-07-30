@@ -1,4 +1,5 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
+
 import { createSupportChatLink } from './support.service.js';
 import type { CreateSupportChatBody } from './support.schemas.js';
 

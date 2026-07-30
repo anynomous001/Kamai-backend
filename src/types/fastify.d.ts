@@ -1,4 +1,5 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
+
 import type { AuthenticatedUser } from '../shared/types/index.js';
 
 // Extend Fastify types to include authenticated user

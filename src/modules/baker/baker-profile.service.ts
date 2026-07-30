@@ -2,6 +2,7 @@ import { prisma } from '../../shared/database/prisma.js';
 import { NotFoundError } from '../../shared/errors/index.js';
 import { storageProvider } from '../../shared/storage/supabase.storage.js';
 import { auditService } from '../../shared/audit/index.js';
+
 import { BakerProfileMapper } from './baker-profile.mapper.js';
 import type { UpdateBakerProfileBody } from './baker.schemas.js';
 

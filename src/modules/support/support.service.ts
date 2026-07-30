@@ -3,6 +3,7 @@ import { prisma } from '../../shared/database/prisma.js';
 import { auditService } from '../../shared/audit/index.js';
 import { NotFoundError, ServiceUnavailableError } from '../../shared/errors/index.js';
 import { DeepLinkGenerator } from '../notifications/deep-link.generator.js';
+
 import type { SupportIssueType } from './support.schemas.js';
 import { SupportMessageFormatter } from './support-message.formatter.js';
 

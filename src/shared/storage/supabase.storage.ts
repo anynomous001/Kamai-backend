@@ -1,7 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
-import type { StorageProvider } from './storage-provider.interface.js';
+
 import { env } from '../../config/env.js';
 import { InternalServerError } from '../errors/index.js';
+
+import type { StorageProvider } from './storage-provider.interface.js';
 
 export class SupabaseStorageProvider implements StorageProvider {
   private supabase: ReturnType<typeof createClient> | null = null;

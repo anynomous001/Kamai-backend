@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+
 import { loadSummaryDashboard, getCalendar } from './dashboard.controller.js';
 import { dashboardSummaryJsonSchema, getCalendarJsonSchema } from './dashboard.schemas.js';
 
