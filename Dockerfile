@@ -68,7 +68,12 @@ USER fastify
 
 EXPOSE 3001
 
+# `localhost` resolves to ::1 first in this image's /etc/hosts, and
+# Fastify only binds IPv4 (0.0.0.0) — busybox wget doesn't fall back to
+# the IPv4 address on connection refused, so this must target 127.0.0.1
+# explicitly or the container is permanently reported unhealthy despite
+# serving requests correctly (verified: reproduced the exact failure).
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget -qO- http://localhost:3001/health || exit 1
+  CMD wget -qO- http://127.0.0.1:3001/health || exit 1
 
 CMD ["node", "dist/main.js"]
