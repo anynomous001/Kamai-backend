@@ -29,11 +29,7 @@ export const getCustomersJsonSchema = {
         enum: ['name', 'lastOrderDate', 'lifetimeValue', 'totalOrders', 'outstandingBalance'],
         default: 'lastOrderDate',
       },
-      order: {
-        type: 'string',
-        enum: ['asc', 'desc'],
-        default: 'desc',
-      },
+      order: { type: 'string', enum: ['asc', 'desc'], default: 'desc' },
     },
   },
   response: {
@@ -51,13 +47,14 @@ export const getCustomersJsonSchema = {
                 type: 'object',
                 properties: {
                   customerId: { type: 'string' },
+                  displayId: { type: 'string' },
                   name: { type: 'string' },
-                  phone: { type: 'string' },
+                  phone: { type: ['string', 'null'] },
                   address: { type: ['string', 'null'] },
                   totalOrders: { type: 'integer' },
                   lifetimeValue: { type: 'number' },
                   outstandingBalance: { type: 'number' },
-                  lastOrderDate: { type: ['string', 'null'], format: 'date-time' },
+                  lastOrderDate: { type: ['string', 'null'], format: 'date' },
                 },
               },
             },
@@ -99,9 +96,7 @@ export const getCustomerProfileJsonSchema = {
   security: [{ cookieAuth: [] }],
   params: {
     type: 'object',
-    properties: {
-      customerId: { type: 'string' },
-    },
+    properties: { customerId: { type: 'string' } },
     required: ['customerId'],
   },
   querystring: {
@@ -121,8 +116,9 @@ export const getCustomerProfileJsonSchema = {
           type: 'object',
           properties: {
             customerId: { type: 'string' },
+            displayId: { type: 'string' },
             name: { type: 'string' },
-            phone: { type: 'string' },
+            phone: { type: ['string', 'null'] },
             address: { type: ['string', 'null'] },
             notes: { type: ['string', 'null'] },
             preferredDeliveryTime: { type: ['string', 'null'] },
@@ -132,7 +128,7 @@ export const getCustomerProfileJsonSchema = {
                 totalOrders: { type: 'integer' },
                 lifetimeValue: { type: 'number' },
                 outstandingBalance: { type: 'number' },
-                lastOrderDate: { type: ['string', 'null'], format: 'date-time' },
+                lastOrderDate: { type: ['string', 'null'], format: 'date' },
               },
             },
             orders: {
@@ -142,7 +138,7 @@ export const getCustomerProfileJsonSchema = {
                 properties: {
                   orderId: { type: 'string' },
                   orderNumber: { type: 'string' },
-                  deliveryDate: { type: 'string', format: 'date-time' },
+                  deliveryDate: { type: 'string', format: 'date' },
                   status: { type: 'string' },
                   totalPrice: { type: 'number' },
                   balanceDue: { type: 'number' },
@@ -168,10 +164,7 @@ export const getCustomerProfileJsonSchema = {
     404: {
       description: 'Customer not found or access denied',
       type: 'object',
-      properties: {
-        success: { type: 'boolean', default: false },
-        error: { type: 'string' },
-      },
+      properties: { success: { type: 'boolean', default: false }, error: { type: 'string' } },
     },
   },
 };
@@ -184,7 +177,7 @@ export const UpdateCustomerParamsSchema = z.object({
 
 export const UpdateCustomerBodySchema = z.object({
   name: z.string().min(1).max(100),
-  phone: z.string().min(10).max(15),
+  phone: z.string().min(10).max(15).nullable().optional(),
   address: z.string().max(500).optional().nullable(),
   notes: z.string().max(1000).optional().nullable(),
   preferredDeliveryTime: z.string().max(50).optional().nullable(),
@@ -199,21 +192,19 @@ export const updateCustomerJsonSchema = {
   security: [{ cookieAuth: [] }],
   params: {
     type: 'object',
-    properties: {
-      customerId: { type: 'string' },
-    },
+    properties: { customerId: { type: 'string' } },
     required: ['customerId'],
   },
   body: {
     type: 'object',
     properties: {
       name: { type: 'string', maxLength: 100 },
-      phone: { type: 'string', minLength: 10, maxLength: 15 },
+      phone: { type: ['string', 'null'], minLength: 10, maxLength: 15 },
       address: { type: ['string', 'null'], maxLength: 500 },
       notes: { type: ['string', 'null'], maxLength: 1000 },
       preferredDeliveryTime: { type: ['string', 'null'], maxLength: 50 },
     },
-    required: ['name', 'phone'],
+    required: ['name'],
   },
   response: {
     200: {
@@ -225,8 +216,9 @@ export const updateCustomerJsonSchema = {
           type: 'object',
           properties: {
             customerId: { type: 'string' },
+            displayId: { type: 'string' },
             name: { type: 'string' },
-            phone: { type: 'string' },
+            phone: { type: ['string', 'null'] },
             address: { type: ['string', 'null'] },
             notes: { type: ['string', 'null'] },
             preferredDeliveryTime: { type: ['string', 'null'] },
@@ -241,30 +233,18 @@ export const updateCustomerJsonSchema = {
       properties: {
         success: { type: 'boolean', default: false },
         error: { type: 'string' },
-        issues: {
-          type: 'array',
-          items: {
-            type: 'object',
-            additionalProperties: true,
-          },
-        },
+        issues: { type: 'array', items: { type: 'object', additionalProperties: true } },
       },
     },
     404: {
       description: 'Customer not found or access denied',
       type: 'object',
-      properties: {
-        success: { type: 'boolean', default: false },
-        error: { type: 'string' },
-      },
+      properties: { success: { type: 'boolean', default: false }, error: { type: 'string' } },
     },
     409: {
       description: 'Customer with this phone already exists',
       type: 'object',
-      properties: {
-        success: { type: 'boolean', default: false },
-        error: { type: 'string' },
-      },
+      properties: { success: { type: 'boolean', default: false }, error: { type: 'string' } },
     },
   },
 };

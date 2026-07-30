@@ -22,20 +22,22 @@ describe('Action 5 E2E: Order History', () => {
     // Create a dummy order
     await prisma.order.create({
       data: {
-        orderNumber: 'ORD-HIST-001',
+        displayId: 'ORD-HIST-001',
         baker: { connect: { id: 'test-baker-id' } },
-        category: 'Cake',
-        weight: '1kg',
-        flavour: 'Vanilla',
+        cakeCategory: 'Cake',
+        cakeFlavour: 'Vanilla',
+        deliveryType: 'pickup',
         deliveryDate: new Date(),
-        totalPrice: 100000,
-        advancePaid: 50000,
-        balanceDue: 50000,
+        totalPrice: 1000,
+        advancePaid: 500,
+        balanceDue: 500,
+        orderStatus: 'Confirmed',
+        paymentStatus: 'Partially Paid',
         customer: {
           create: {
             bakerId: 'test-baker-id',
             name: 'Dummy Customer',
-            phone: '+919999999993',
+            phone: '9999999993',
           },
         },
       },

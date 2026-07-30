@@ -1,15 +1,18 @@
 import type { Baker } from '@prisma/client';
 import { prisma } from '../../shared/database/prisma.js';
 
+// Amounts in rupees (the baker-ops schema stores money as numeric rupees,
+// not integer paise). Same materials/quantities as before, values divided
+// by 100 from the old paise-scale seed data.
 const DEFAULT_MATERIALS = [
-  { materialName: 'Flour', unit: 'kg', pricePerUnit: 5000, quantity: 10, totalCost: 50000 },
-  { materialName: 'Sugar', unit: 'kg', pricePerUnit: 4500, quantity: 5, totalCost: 22500 },
-  { materialName: 'Butter', unit: 'g', pricePerUnit: 50, quantity: 1000, totalCost: 50000 },
-  { materialName: 'Fresh Cream', unit: 'ml', pricePerUnit: 25, quantity: 1000, totalCost: 25000 },
-  { materialName: 'Chocolate', unit: 'g', pricePerUnit: 80, quantity: 500, totalCost: 40000 },
-  { materialName: 'Cake Board', unit: 'pcs', pricePerUnit: 2000, quantity: 20, totalCost: 40000 },
-  { materialName: 'Packaging Box', unit: 'pcs', pricePerUnit: 3500, quantity: 20, totalCost: 70000 },
-  { materialName: 'Cake Box', unit: 'pcs', pricePerUnit: 3000, quantity: 20, totalCost: 60000 },
+  { materialName: 'Flour', unit: 'kg', pricePerUnit: 50, quantity: 10, totalCost: 500, category: 'Ingredients' },
+  { materialName: 'Sugar', unit: 'kg', pricePerUnit: 45, quantity: 5, totalCost: 225, category: 'Ingredients' },
+  { materialName: 'Butter', unit: 'g', pricePerUnit: 0.5, quantity: 1000, totalCost: 500, category: 'Ingredients' },
+  { materialName: 'Fresh Cream', unit: 'ml', pricePerUnit: 0.25, quantity: 1000, totalCost: 250, category: 'Ingredients' },
+  { materialName: 'Chocolate', unit: 'g', pricePerUnit: 0.8, quantity: 500, totalCost: 400, category: 'Ingredients' },
+  { materialName: 'Cake Board', unit: 'pcs', pricePerUnit: 20, quantity: 20, totalCost: 400, category: 'Packaging' },
+  { materialName: 'Packaging Box', unit: 'pcs', pricePerUnit: 35, quantity: 20, totalCost: 700, category: 'Packaging' },
+  { materialName: 'Cake Box', unit: 'pcs', pricePerUnit: 30, quantity: 20, totalCost: 600, category: 'Packaging' },
 ];
 
 export class TenantService {
@@ -19,20 +22,19 @@ export class TenantService {
    */
   static async provisionTenant(email: string): Promise<Baker> {
     const now = new Date();
-    const trialEndDate = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
 
     return await prisma.$transaction(async (tx) => {
       // 1. Insert Baker
+      // trialEndsAt is intentionally omitted — the DB default
+      // (now() + interval '90 days') computes it at insert time.
       const baker = await tx.baker.create({
         data: {
           email,
           status: 'PENDING_ONBOARDING',
           subscriptionStatus: 'TRIAL',
-          trialStartDate: now,
-          trialEndDate,
           preferredApps: ['WHATSAPP', 'INSTAGRAM'],
           defaultCollectionMethod: 'UPI',
-          dynamicQrEnabled: true,
+          qrCodeEnabled: true,
         },
       });
 
@@ -45,6 +47,7 @@ export class TenantService {
           pricePerUnit: mat.pricePerUnit,
           quantity: mat.quantity,
           totalCost: mat.totalCost,
+          category: mat.category,
           purchaseDate: now,
         })),
       });

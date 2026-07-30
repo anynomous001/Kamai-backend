@@ -28,22 +28,32 @@ export async function generateWhatsAppMessage(
     throw new BadRequestError('Customer phone number is required.');
   }
 
+  // whatsappReceiptEnabled is a soft default only — it controls whether
+  // receipts are suggested/pre-filled by default, not whether a RECEIPT
+  // message can be sent. An explicit request for this template must
+  // always be honored.
+
   // 2. Build OrderData
+  const cakeDescription = order.weightInPounds
+    ? `${order.cakeFlavour} ${order.cakeCategory} (${order.weightInPounds} lb)`
+    : `${order.cakeFlavour} ${order.cakeCategory}`;
+
   const orderData: OrderData = {
-    orderNumber: order.orderNumber,
+    orderNumber: order.displayId,
     items: [
       {
-        name: `${order.flavour} ${order.category} (${order.weight})`,
-        quantity: 1,
+        name: cakeDescription,
+        quantity: order.quantity ? Number(order.quantity) : 1,
       },
     ],
     deliveryDate: order.deliveryDate,
-    totalPrice: order.totalPrice,
-    advancePaid: order.advancePaid,
-    balanceDue: order.balanceDue,
+    deliveryType: order.deliveryType as 'pickup' | 'delivery',
+    totalPrice: Number(order.totalPrice),
+    advancePaid: Number(order.advancePaid),
+    balanceDue: Number(order.balanceDue),
     customerName: order.customer.name,
     bakerBusinessName: order.baker.businessName || 'Your Baker',
-    upiId: order.baker.upiId,
+    upiId: order.baker.upiVpa,
   };
 
   // 3. Generate Message

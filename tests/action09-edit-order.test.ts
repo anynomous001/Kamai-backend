@@ -21,15 +21,17 @@ describe('Action 9 E2E: Edit Order Details', () => {
 
     await prisma.order.create({
       data: {
-        orderNumber: 'ORD-EDT-001',
+        displayId: 'ORD-EDT-001',
         baker: { connect: { id: 'test-baker-id' } },
-        category: 'Cake',
-        weight: '1kg',
-        flavour: 'Vanilla',
+        cakeCategory: 'Cake',
+        cakeFlavour: 'Vanilla',
+        deliveryType: 'pickup',
         deliveryDate: new Date(),
-        totalPrice: 100000,
-        advancePaid: 30000,
-        balanceDue: 70000,
+        totalPrice: 1000,
+        advancePaid: 300,
+        balanceDue: 700,
+        orderStatus: 'Confirmed',
+        paymentStatus: 'Partially Paid',
         customer: {
           create: {
             bakerId: 'test-baker-id',
@@ -59,24 +61,24 @@ describe('Action 9 E2E: Edit Order Details', () => {
         },
         cake: {
           category: 'Cake',
-          weight: '1.5kg',
           flavour: 'Chocolate Fudge',
         },
         delivery: {
+          type: 'pickup',
           date: '2026-11-20',
           time: '12:00',
         },
         payment: {
-          totalPrice: 150000, // increased price
-          advancePaid: 30000, // advance unchanged
+          totalPrice: 1500, // increased price
+          advancePaid: 300, // advance unchanged
         },
-        referencePhoto: 'https://newphoto.com',
+        referencePhotoUrl: 'https://newphoto.com',
       },
     });
 
     expect(response.statusCode).toBe(200);
     const body = JSON.parse(response.body);
     expect(body.success).toBe(true);
-    expect(body.data.balanceDue).toBe(120000); // 150000 - 30000
+    expect(body.data.balanceDue).toBe(1200); // 1500 - 300
   });
 });

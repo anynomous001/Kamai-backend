@@ -4,23 +4,28 @@ import { z } from 'zod';
 
 export const InvestmentResponseSchema = z.object({
   id: z.string().uuid(),
+  displayId: z.string(),
+  category: z.string(),
+  description: z.string().nullable(),
   materialName: z.string(),
-  quantity: z.number(), // Returned as number from decimal
+  quantity: z.number(),
   unit: z.string(),
-  pricePerUnit: z.number().int(),
-  totalCost: z.number().int(),
-  supplier: z.string().nullable(),
-  purchaseDate: z.string(), // ISO String
+  pricePerUnit: z.number(),
+  totalCost: z.number(),
+  supplierName: z.string().nullable(),
+  purchaseDate: z.string(), // YYYY-MM-DD
 });
 
 // ── POST /api/investments ──
 
 export const CreateInvestmentBodySchema = z.object({
+  category: z.string().min(1, 'Category is required'),
+  description: z.string().optional(),
   materialName: z.string().min(1, 'Material name is required'),
   quantity: z.number().positive('Quantity must be greater than zero'),
   unit: z.string().min(1, 'Unit is required'),
-  pricePerUnit: z.number().int().positive('Price per unit must be greater than zero'),
-  supplier: z.string().optional(),
+  pricePerUnit: z.number().positive('Price per unit must be greater than zero'),
+  supplierName: z.string().optional(),
   purchaseDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD format'),
 });
 
@@ -32,13 +37,15 @@ export const createInvestmentJsonSchema = {
   security: [{ cookieAuth: [] }],
   body: {
     type: 'object',
-    required: ['materialName', 'quantity', 'unit', 'pricePerUnit', 'purchaseDate'],
+    required: ['category', 'materialName', 'quantity', 'unit', 'pricePerUnit', 'purchaseDate'],
     properties: {
+      category: { type: 'string' },
+      description: { type: 'string' },
       materialName: { type: 'string' },
       quantity: { type: 'number', exclusiveMinimum: 0 },
       unit: { type: 'string' },
-      pricePerUnit: { type: 'integer', exclusiveMinimum: 0, description: 'Amount in paise' },
-      supplier: { type: 'string' },
+      pricePerUnit: { type: 'number', exclusiveMinimum: 0, description: 'Amount in rupees' },
+      supplierName: { type: 'string' },
       purchaseDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
     },
   },
@@ -52,6 +59,7 @@ export const createInvestmentJsonSchema = {
           type: 'object',
           properties: {
             id: { type: 'string', format: 'uuid' },
+            displayId: { type: 'string' },
           },
         },
       },
@@ -59,10 +67,7 @@ export const createInvestmentJsonSchema = {
     400: {
       description: 'Validation Error',
       type: 'object',
-      properties: {
-        success: { type: 'boolean', default: false },
-        error: { type: 'string' },
-      },
+      properties: { success: { type: 'boolean', default: false }, error: { type: 'string' } },
     },
   },
 };
@@ -72,6 +77,7 @@ export const createInvestmentJsonSchema = {
 export const GetInvestmentsQuerySchema = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD format').optional(),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD format').optional(),
+  category: z.string().optional(),
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().default(20),
 });
@@ -79,7 +85,7 @@ export const GetInvestmentsQuerySchema = z.object({
 export type GetInvestmentsQuery = z.infer<typeof GetInvestmentsQuerySchema>;
 
 export const getInvestmentsJsonSchema = {
-  description: 'Retrieve the investment ledger with date range filtering and pagination',
+  description: 'Retrieve the investment ledger with date range/category filtering and pagination',
   tags: ['Investments'],
   security: [{ cookieAuth: [] }],
   querystring: {
@@ -87,8 +93,9 @@ export const getInvestmentsJsonSchema = {
     properties: {
       from: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
       to: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
-      page: { type: 'integer', default: 1 },
-      limit: { type: 'integer', default: 20 },
+      category: { type: 'string' },
+      page: { type: ['integer', 'string'], default: 1 },
+      limit: { type: ['integer', 'string'], default: 20 },
     },
   },
   response: {
@@ -106,21 +113,22 @@ export const getInvestmentsJsonSchema = {
                 type: 'object',
                 properties: {
                   id: { type: 'string', format: 'uuid' },
+                  displayId: { type: 'string' },
+                  category: { type: 'string' },
+                  description: { type: 'string', nullable: true },
                   materialName: { type: 'string' },
                   quantity: { type: 'number' },
                   unit: { type: 'string' },
-                  pricePerUnit: { type: 'integer' },
-                  totalCost: { type: 'integer' },
-                  supplier: { type: 'string', nullable: true },
+                  pricePerUnit: { type: 'number' },
+                  totalCost: { type: 'number' },
+                  supplierName: { type: 'string', nullable: true },
                   purchaseDate: { type: 'string' },
                 },
               },
             },
             summary: {
               type: 'object',
-              properties: {
-                totalExpense: { type: 'integer' },
-              },
+              properties: { totalExpense: { type: 'number' } },
             },
             pagination: {
               type: 'object',
@@ -149,25 +157,18 @@ export const deleteInvestmentJsonSchema = {
   params: {
     type: 'object',
     required: ['entryId'],
-    properties: {
-      entryId: { type: 'string', format: 'uuid' },
-    },
+    properties: { entryId: { type: 'string', format: 'uuid' } },
   },
   response: {
     200: {
       description: 'Investment deleted successfully',
       type: 'object',
-      properties: {
-        success: { type: 'boolean', default: true },
-      },
+      properties: { success: { type: 'boolean', default: true } },
     },
     404: {
       description: 'Investment not found or already deleted',
       type: 'object',
-      properties: {
-        success: { type: 'boolean', default: false },
-        error: { type: 'string' },
-      },
+      properties: { success: { type: 'boolean', default: false }, error: { type: 'string' } },
     },
   },
 };

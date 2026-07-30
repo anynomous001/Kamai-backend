@@ -7,6 +7,7 @@ export class WhatsAppTemplateEngine {
     const footer = `Thank you,\n${data.bakerBusinessName} ❤️`;
     const orderSummary = MessageFormatter.buildOrderSummary(data);
     const paymentSection = MessageFormatter.buildPaymentSection(data.upiId);
+    const fulfilmentMoment = data.deliveryType === 'pickup' ? 'pickup' : 'delivery';
 
     let purpose = '';
     let callToAction = '';
@@ -22,20 +23,22 @@ export class WhatsAppTemplateEngine {
       case WhatsAppNotificationTemplate.PAYMENT_REMINDER:
         purpose = `This is a reminder for your order #${data.orderNumber}.`;
         if (data.balanceDue > 0 && data.upiId) {
-          callToAction = `Kindly complete the remaining payment before pickup.\n\n${paymentSection}`;
+          callToAction = `Kindly complete the remaining payment before ${fulfilmentMoment}.\n\n${paymentSection}`;
         } else if (data.balanceDue > 0) {
-          callToAction = 'Kindly complete the remaining payment before pickup.';
+          callToAction = `Kindly complete the remaining payment before ${fulfilmentMoment}.`;
         }
         break;
 
-      case WhatsAppNotificationTemplate.READY_FOR_PICKUP:
-        purpose = `Your order #${data.orderNumber} is ready for pickup!`;
+      case WhatsAppNotificationTemplate.READY_FOR_PICKUP: {
+        const readyVerb = data.deliveryType === 'pickup' ? 'ready for pickup' : 'ready and out for delivery';
+        purpose = `Your order #${data.orderNumber} is ${readyVerb}!`;
         if (data.balanceDue > 0 && data.upiId) {
-          callToAction = `Please clear your balance of ${MessageFormatter.formatPrice(data.balanceDue)} at pickup or via UPI:\n\n${paymentSection}`;
+          callToAction = `Please clear your balance of ${MessageFormatter.formatPrice(data.balanceDue)} at ${fulfilmentMoment} or via UPI:\n\n${paymentSection}`;
         } else if (data.balanceDue > 0) {
-          callToAction = `Please clear your balance of ${MessageFormatter.formatPrice(data.balanceDue)} at pickup.`;
+          callToAction = `Please clear your balance of ${MessageFormatter.formatPrice(data.balanceDue)} at ${fulfilmentMoment}.`;
         }
         break;
+      }
 
       case WhatsAppNotificationTemplate.RECEIPT:
         purpose = `Here is the receipt for your order #${data.orderNumber}.`;

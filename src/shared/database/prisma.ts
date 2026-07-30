@@ -20,6 +20,10 @@ export const prisma: PrismaClient =
             { emit: 'stdout', level: 'warn' },
           ]
         : [{ emit: 'stdout', level: 'error' }],
+    // Default 5000ms is too tight for multi-round-trip interactive
+    // transactions (order create/update touches customer + order +
+    // payment_events + audit log) over the pooled connection's latency.
+    transactionOptions: { timeout: 15000 },
   });
 
 if (env.NODE_ENV !== 'production') {

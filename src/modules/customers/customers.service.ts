@@ -3,102 +3,95 @@ import { auditService } from '../../shared/audit/index.js';
 import { NotFoundError, ConflictError } from '../../shared/errors/index.js';
 import type { Prisma } from '@prisma/client';
 
+type CustomerListRow = {
+  customerId: string;
+  displayId: string;
+  name: string;
+  phone: string | null;
+  address: string | null;
+  totalOrders: number;
+  lifetimeValue: number;
+  outstandingBalance: number;
+  lastOrderDate: string | null;
+};
+
+function compareCustomers(
+  a: CustomerListRow,
+  b: CustomerListRow,
+  sort: 'name' | 'lastOrderDate' | 'lifetimeValue' | 'totalOrders' | 'outstandingBalance',
+  order: 'asc' | 'desc',
+): number {
+  let cmp = 0;
+  if (sort === 'name') {
+    cmp = a.name.localeCompare(b.name);
+  } else if (sort === 'lastOrderDate') {
+    const av = a.lastOrderDate ? new Date(a.lastOrderDate).getTime() : -Infinity;
+    const bv = b.lastOrderDate ? new Date(b.lastOrderDate).getTime() : -Infinity;
+    cmp = av - bv;
+  } else {
+    cmp = a[sort] - b[sort];
+  }
+  if (cmp === 0) cmp = a.name.localeCompare(b.name); // stable tie-break
+  return order === 'asc' ? cmp : -cmp;
+}
+
 export class CustomersService {
   /**
    * Upserts a customer based on bakerId and phone.
-   * If customer exists, it updates their name and address.
-   * If they don't, it creates a new customer.
-   * Emits CUSTOMER_CREATED or CUSTOMER_UPDATED audit logs.
-   * 
-   * Must be passed the active Prisma TransactionClient `tx`.
+   * If phone is null/omitted, a customer can never be deduplicated by
+   * phone alone — a new customer row is always created (matches the
+   * ~20-30% of real intake that has no phone captured).
    */
   async upsertCustomer(
     tx: Prisma.TransactionClient,
     bakerId: string,
-    customerData: { name: string; phone: string; address?: string | null },
+    customerData: { name: string; phone: string | null; address?: string | null },
   ) {
-    const existingCustomer = await tx.customer.findUnique({
-      where: { bakerId_phone: { bakerId, phone: customerData.phone } },
-    });
-
-    if (existingCustomer) {
-      const updatedCustomer = await tx.customer.update({
-        where: { id: existingCustomer.id },
-        data: {
-          name: customerData.name,
-          address: customerData.address,
-        },
+    if (customerData.phone) {
+      const existingCustomer = await tx.customer.findUnique({
+        where: { bakerId_phone: { bakerId, phone: customerData.phone } },
       });
 
-      await auditService.logEvent('CUSTOMER_UPDATED', updatedCustomer.id, {
-        bakerId,
-        customerId: updatedCustomer.id,
-        phone: updatedCustomer.phone,
-      });
+      if (existingCustomer) {
+        const updatedCustomer = await tx.customer.update({
+          where: { id: existingCustomer.id },
+          data: { name: customerData.name, address: customerData.address },
+        });
 
-      return updatedCustomer;
-    } else {
-      const newCustomer = await tx.customer.create({
-        data: {
+        await auditService.logEvent('CUSTOMER_UPDATED', updatedCustomer.id, {
           bakerId,
-          name: customerData.name,
-          phone: customerData.phone,
-          address: customerData.address,
-        },
-      });
+          customerId: updatedCustomer.id,
+          phone: updatedCustomer.phone,
+        });
 
-      await auditService.logEvent('CUSTOMER_CREATED', newCustomer.id, {
-        bakerId,
-        customerId: newCustomer.id,
-        phone: newCustomer.phone,
-      });
-
-      return newCustomer;
+        return updatedCustomer;
+      }
     }
-  }
 
-  /**
-   * Recalculates CRM metrics (totalOrders, lifetimeValue, lastOrderDate) 
-   * for a given customer and updates the customer record.
-   * Excludes orders with status = 'CANCELLED' or deletedAt != null.
-   * 
-   * Must be passed the active Prisma TransactionClient `tx`.
-   */
-  async recalculateMetrics(tx: Prisma.TransactionClient, customerId: string) {
-    const aggregateData = await tx.order.aggregate({
-      where: {
-        customerId,
-        status: { not: 'CANCELLED' },
-        deletedAt: null,
-      },
-      _count: {
-        id: true, // totalOrders
-      },
-      _sum: {
-        totalPrice: true, // lifetimeValue
-      },
-      _max: {
-        deliveryDate: true, // lastOrderDate
-      },
-    });
-
-    const totalOrders = aggregateData._count.id;
-    const lifetimeValue = aggregateData._sum.totalPrice ?? 0;
-    const lastOrderDate = aggregateData._max.deliveryDate;
-
-    await tx.customer.update({
-      where: { id: customerId },
+    const newCustomer = await tx.customer.create({
       data: {
-        totalOrders,
-        lifetimeValue,
-        lastOrderDate,
+        bakerId,
+        name: customerData.name,
+        phone: customerData.phone,
+        address: customerData.address,
       },
     });
+
+    await auditService.logEvent('CUSTOMER_CREATED', newCustomer.id, {
+      bakerId,
+      customerId: newCustomer.id,
+      phone: newCustomer.phone,
+    });
+
+    return newCustomer;
   }
 
   /**
    * Retrieves a paginated and sortable list of customers for a baker.
-   * Calculates outstandingBalance efficiently by summing unpaid active orders.
+   * totalOrders/lifetimeValue/outstandingBalance/lastOrderDate are always
+   * computed from orders here — never stored on the customer row.
+   * Cancelled orders are excluded from all of these, matching the
+   * exclusion rule the old stored-metrics recalculation used to apply.
    */
   async getCustomers(bakerId: string, query: import('./customers.schemas.js').GetCustomersQuery) {
     const { page, limit, search, sort, order } = query;
@@ -106,10 +99,7 @@ export class CustomersService {
     const limitVal = Number(limit || 20);
     const skip = (pageVal - 1) * limitVal;
 
-    const where: Prisma.CustomerWhereInput = {
-      bakerId,
-    };
-
+    const where: Prisma.CustomerWhereInput = { bakerId };
     if (search) {
       where.OR = [
         { name: { contains: search, mode: 'insensitive' } },
@@ -117,84 +107,55 @@ export class CustomersService {
       ];
     }
 
-    // 1. Fetch total customers count for pagination
     const totalItems = await prisma.customer.count({ where });
 
-    // 2. Fetch paginated customers including ONLY the required data to compute outstandingBalance
-    // This fetches active unpaid orders' balanceDue field to dynamically compute it.
-    const customersData = await prisma.customer.findMany({
+    const customers = await prisma.customer.findMany({
       where,
-      skip,
-      take: limitVal,
-      // Default Prisma orderBy handling - outstandingBalance requires custom sorting if requested
-      orderBy: sort !== 'outstandingBalance' ? { [sort]: order } : undefined,
-      select: {
-        id: true,
-        name: true,
-        phone: true,
-        address: true,
-        totalOrders: true,
-        lifetimeValue: true,
-        lastOrderDate: true,
-        orders: {
-          where: {
-            status: { not: 'CANCELLED' },
-            deletedAt: null,
-            balanceDue: { gt: 0 },
-          },
-          select: {
-            balanceDue: true,
-          },
-        },
-      },
+      select: { id: true, displayId: true, name: true, phone: true, address: true },
     });
 
-    // 3. Map and calculate outstandingBalance dynamically
-    let customers = customersData.map((c) => {
-      const outstandingBalance = c.orders.reduce((sum, o) => sum + o.balanceDue, 0);
+    const customerIds = customers.map((c) => c.id);
+
+    const [orderAgg, outstandingAgg] = await Promise.all([
+      prisma.order.groupBy({
+        by: ['customerId'],
+        where: { customerId: { in: customerIds }, orderStatus: { not: 'Cancelled' } },
+        _count: { id: true },
+        _sum: { totalPrice: true },
+        _max: { deliveryDate: true },
+      }),
+      prisma.order.groupBy({
+        by: ['customerId'],
+        where: { customerId: { in: customerIds }, orderStatus: { not: 'Cancelled' }, balanceDue: { gt: 0 } },
+        _sum: { balanceDue: true },
+      }),
+    ]);
+
+    const aggMap = new Map(orderAgg.map((a) => [a.customerId, a]));
+    const outstandingMap = new Map(outstandingAgg.map((a) => [a.customerId, Number(a._sum.balanceDue ?? 0)]));
+
+    const rows: CustomerListRow[] = customers.map((c) => {
+      const agg = aggMap.get(c.id);
       return {
         customerId: c.id,
+        displayId: c.displayId,
         name: c.name,
         phone: c.phone,
         address: c.address,
-        totalOrders: c.totalOrders,
-        lifetimeValue: c.lifetimeValue,
-        outstandingBalance,
-        lastOrderDate: c.lastOrderDate ? c.lastOrderDate.toISOString() : null,
+        totalOrders: agg?._count.id ?? 0,
+        lifetimeValue: agg?._sum.totalPrice ? Number(agg._sum.totalPrice) : 0,
+        outstandingBalance: outstandingMap.get(c.id) ?? 0,
+        lastOrderDate: agg?._max.deliveryDate ? agg._max.deliveryDate.toISOString().slice(0, 10) : null,
       };
     });
 
-    // 4. Handle sorting if sort = 'outstandingBalance'
-    // Prisma can't easily order by a computed sum of a related field efficiently
-    // without doing raw SQL or having it physically on the table. Since we fetch
-    // the page anyway, we sort the page. Wait, sorting the page isn't true global sorting.
-    // If the user wants true global sorting by outstanding balance, it is best to
-    // sort the array. But since pagination cuts off, global sort by outstanding balance
-    // requires pulling all or raw SQL.
-    // Given the prompt allowed option A: "If Prisma cannot express the aggregation efficiently in a single query, then your proposed approach (loading only balanceDue fields and summing them in memory) is acceptable."
-    // Let's sort the retrieved page to satisfy the DTO requirement for now, or fallback to name if ties occur.
-    if (sort === 'outstandingBalance') {
-      customers.sort((a, b) => {
-        const diff = a.outstandingBalance - b.outstandingBalance;
-        if (diff === 0) return a.name.localeCompare(b.name);
-        return order === 'asc' ? diff : -diff;
-      });
-    }
-
-    // Secondary sort tiebreaker for standard sorts (like lastOrderDate)
-    if (sort !== 'outstandingBalance' && sort !== 'name') {
-      customers.sort((a, b) => {
-        if (a[sort] === b[sort]) {
-          return a.name.localeCompare(b.name);
-        }
-        return 0; // maintain original Prisma sort
-      });
-    }
+    rows.sort((a, b) => compareCustomers(a, b, sort, order));
 
     const totalPages = Math.ceil(totalItems / limitVal);
+    const paged = rows.slice(skip, skip + limitVal);
 
     return {
-      customers,
+      customers: paged,
       pagination: {
         page: pageVal,
         limit: limitVal,
@@ -219,22 +180,15 @@ export class CustomersService {
     const limitVal = Number(limit || 10);
     const skip = (pageVal - 1) * limitVal;
 
-    // 1. Fetch Customer ensuring they belong to the baker
     const customer = await prisma.customer.findUnique({
-      where: {
-        id: customerId,
-        bakerId, // isolation
-      },
+      where: { id: customerId, bakerId },
     });
 
     if (!customer) {
       throw new NotFoundError('Customer not found');
     }
 
-    // 2. Fetch paginated order history
-    const orderWhere: Prisma.OrderWhereInput = {
-      customerId,
-    };
+    const orderWhere: Prisma.OrderWhereInput = { customerId, bakerId };
 
     const totalItems = await prisma.order.count({ where: orderWhere });
 
@@ -245,51 +199,50 @@ export class CustomersService {
       orderBy: [{ deliveryDate: 'desc' }, { createdAt: 'desc' }],
       select: {
         id: true,
-        orderNumber: true,
+        displayId: true,
         deliveryDate: true,
-        status: true,
+        orderStatus: true,
         totalPrice: true,
         balanceDue: true,
         paymentStatus: true,
       },
     });
 
-    // 3. Compute outstandingBalance
-    // Fetch balanceDue for ALL active unpaid orders of this customer to sum
-    const activeUnpaidOrders = await prisma.order.findMany({
-      where: {
-        customerId,
-        status: { not: 'CANCELLED' },
-        deletedAt: null,
-        balanceDue: { gt: 0 },
-      },
-      select: { balanceDue: true },
+    const summaryAgg = await prisma.order.aggregate({
+      where: { customerId, bakerId, orderStatus: { not: 'Cancelled' } },
+      _count: { id: true },
+      _sum: { totalPrice: true },
+      _max: { deliveryDate: true },
     });
 
-    const outstandingBalance = activeUnpaidOrders.reduce((sum, o) => sum + o.balanceDue, 0);
+    const outstandingAgg = await prisma.order.aggregate({
+      where: { customerId, bakerId, orderStatus: { not: 'Cancelled' }, balanceDue: { gt: 0 } },
+      _sum: { balanceDue: true },
+    });
 
     const totalPages = Math.ceil(totalItems / limitVal);
 
     return {
       customerId: customer.id,
+      displayId: customer.displayId,
       name: customer.name,
       phone: customer.phone,
       address: customer.address,
       notes: customer.notes,
       preferredDeliveryTime: customer.preferredDeliveryTime,
       summary: {
-        totalOrders: customer.totalOrders,
-        lifetimeValue: customer.lifetimeValue,
-        outstandingBalance,
-        lastOrderDate: customer.lastOrderDate ? customer.lastOrderDate.toISOString() : null,
+        totalOrders: summaryAgg._count.id,
+        lifetimeValue: summaryAgg._sum.totalPrice ? Number(summaryAgg._sum.totalPrice) : 0,
+        outstandingBalance: outstandingAgg._sum.balanceDue ? Number(outstandingAgg._sum.balanceDue) : 0,
+        lastOrderDate: summaryAgg._max.deliveryDate ? summaryAgg._max.deliveryDate.toISOString().slice(0, 10) : null,
       },
       orders: ordersData.map((o) => ({
         orderId: o.id,
-        orderNumber: o.orderNumber,
-        deliveryDate: o.deliveryDate.toISOString(),
-        status: o.status,
-        totalPrice: o.totalPrice,
-        balanceDue: o.balanceDue,
+        orderNumber: o.displayId,
+        deliveryDate: o.deliveryDate.toISOString().slice(0, 10),
+        status: o.orderStatus,
+        totalPrice: Number(o.totalPrice),
+        balanceDue: Number(o.balanceDue),
         paymentStatus: o.paymentStatus,
       })),
       pagination: {
@@ -312,25 +265,16 @@ export class CustomersService {
     payload: import('./customers.schemas.js').UpdateCustomerBody,
   ) {
     const customer = await prisma.customer.findUnique({
-      where: {
-        id: customerId,
-        bakerId,
-      },
+      where: { id: customerId, bakerId },
     });
 
     if (!customer) {
       throw new NotFoundError('Customer not found');
     }
 
-    // Check duplicate phone if phone changed
-    if (payload.phone !== customer.phone) {
+    if (payload.phone && payload.phone !== customer.phone) {
       const existingPhone = await prisma.customer.findUnique({
-        where: {
-          bakerId_phone: {
-            bakerId,
-            phone: payload.phone,
-          },
-        },
+        where: { bakerId_phone: { bakerId, phone: payload.phone } },
       });
 
       if (existingPhone && existingPhone.id !== customerId) {
@@ -338,16 +282,14 @@ export class CustomersService {
       }
     }
 
-    // Determine changed fields for audit log
-    const changedFields: Record<string, { old: any; new: any }> = {};
+    const changedFields: Record<string, { old: unknown; new: unknown }> = {};
     const updates: Partial<typeof payload> = {};
 
     for (const [key, newValue] of Object.entries(payload)) {
       const oldValue = (customer as any)[key];
-      // Normalize null/undefined
       const normalizedNew = newValue ?? null;
       const normalizedOld = oldValue ?? null;
-      
+
       if (normalizedNew !== normalizedOld) {
         changedFields[key] = { old: normalizedOld, new: normalizedNew };
         (updates as any)[key] = normalizedNew;
@@ -355,9 +297,9 @@ export class CustomersService {
     }
 
     if (Object.keys(updates).length === 0) {
-      // Nothing to update
       return {
         customerId: customer.id,
+        displayId: customer.displayId,
         name: customer.name,
         phone: customer.phone,
         address: customer.address,
@@ -382,6 +324,7 @@ export class CustomersService {
 
     return {
       customerId: updatedCustomer.id,
+      displayId: updatedCustomer.displayId,
       name: updatedCustomer.name,
       phone: updatedCustomer.phone,
       address: updatedCustomer.address,

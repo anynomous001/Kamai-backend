@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
-import { updateUpiSettingsHandler, getBakerProfileHandler } from './baker.controller.js';
-import { UpdateUpiSettingsSchema, GetBakerProfileSchema } from './baker.schemas.js';
+import { updateUpiSettingsHandler, getBakerProfileHandler, updateBakerProfileHandler } from './baker.controller.js';
+import { UpdateUpiSettingsSchema, GetBakerProfileSchema, UpdateBakerProfileSchema } from './baker.schemas.js';
 
 export async function bakerRoutes(app: FastifyInstance) {
   app.put('/upi-settings', {
@@ -13,5 +13,11 @@ export async function bakerRoutes(app: FastifyInstance) {
     schema: GetBakerProfileSchema,
     preHandler: [app.authenticate],
     handler: getBakerProfileHandler,
+  });
+
+  app.patch('/profile', {
+    schema: UpdateBakerProfileSchema,
+    preHandler: [app.authenticate],
+    handler: updateBakerProfileHandler,
   });
 }

@@ -21,21 +21,21 @@ describe('Action 7 E2E: Update Order Status', () => {
 
     await prisma.order.create({
       data: {
-        orderNumber: 'ORD-STS-001',
+        displayId: 'ORD-STS-001',
         baker: { connect: { id: 'test-baker-id' } },
-        category: 'Cake',
-        weight: '1kg',
-        flavour: 'Chocolate',
+        cakeCategory: 'Cake',
+        cakeFlavour: 'Chocolate',
+        deliveryType: 'pickup',
         deliveryDate: new Date(),
-        totalPrice: 150000,
-        advancePaid: 50000,
-        balanceDue: 100000,
-        status: 'PENDING',
+        totalPrice: 1500,
+        advancePaid: 500,
+        balanceDue: 1000,
+        orderStatus: 'Pending',
         customer: {
           create: {
             bakerId: 'test-baker-id',
             name: 'Status Cust',
-            phone: '+919999999995',
+            phone: '9999999995',
           },
         },
       },
@@ -48,28 +48,28 @@ describe('Action 7 E2E: Update Order Status', () => {
     });
   });
 
-  it('should successfully transition status from PENDING to CONFIRMED', async () => {
+  it('should successfully transition status from Pending to Confirmed', async () => {
     const response = await app.inject({
       method: 'PATCH',
       url: '/api/orders/ORD-STS-001/status',
       payload: {
-        status: 'CONFIRMED',
+        status: 'Confirmed',
       },
     });
 
     expect(response.statusCode).toBe(200);
     const body = JSON.parse(response.body);
     expect(body.success).toBe(true);
-    expect(body.data.currentStatus).toBe('CONFIRMED');
+    expect(body.data.currentStatus).toBe('Confirmed');
   });
 
-  it('should reject invalid transition status skip (e.g. to DELIVERED directly)', async () => {
-    // Current status is now CONFIRMED due to previous test
+  it('should reject invalid transition status skip (e.g. to Delivered directly)', async () => {
+    // Current status is now Confirmed due to previous test
     const response = await app.inject({
       method: 'PATCH',
       url: '/api/orders/ORD-STS-001/status',
       payload: {
-        status: 'DELIVERED', // invalid skip from CONFIRMED
+        status: 'Delivered', // invalid skip from Confirmed
       },
     });
 

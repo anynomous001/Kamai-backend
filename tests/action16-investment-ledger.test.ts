@@ -32,11 +32,12 @@ describe('Action 16 E2E: Investment / Expense Ledger', () => {
       method: 'POST',
       url: '/api/investments',
       payload: {
+        category: 'Ingredients',
         materialName: 'Butter',
         quantity: 5,
         unit: 'kg',
-        pricePerUnit: 40000, // 400 INR in paise
-        supplier: 'Amul distributor',
+        pricePerUnit: 400,
+        supplierName: 'Amul distributor',
         purchaseDate: '2026-07-26',
       },
     });
@@ -59,6 +60,19 @@ describe('Action 16 E2E: Investment / Expense Ledger', () => {
     expect(body.success).toBe(true);
     expect(body.data.entries).toBeDefined();
     expect(body.data.entries.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('should accept page/limit as HTTP query-string values (regression: these arrive as strings, not integers)', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/investments?page=1&limit=10',
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body);
+    expect(body.success).toBe(true);
+    expect(body.data.pagination.page).toBe(1);
+    expect(body.data.pagination.limit).toBe(10);
   });
 
   it('should delete a recorded investment expense', async () => {

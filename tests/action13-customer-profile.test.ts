@@ -24,7 +24,7 @@ describe('Action 13 E2E: Customer Profile', () => {
       data: {
         bakerId: 'test-baker-id',
         name: 'Bob Profile',
-        phone: '+919876543213',
+        phone: '9876543213',
       },
     });
     customerId = cust.id;

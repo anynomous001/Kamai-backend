@@ -1,12 +1,57 @@
 import { prisma } from '../../shared/database/prisma.js';
 import { customersService } from '../customers/customers.service.js';
-import { orderNumberService } from './order-number.service.js';
 import { cacheService } from '../../shared/cache/index.js';
 import { auditService } from '../../shared/audit/index.js';
 import { financeService } from '../finance/finance.service.js';
-import { statusValidationService } from './status-validation.service.js';
+import { statusValidationService, type OrderStatusValue } from './status-validation.service.js';
 import type { CreateOrderPayload, RecordPaymentBody, UpdateOrderBody } from './orders.schemas.js';
 import { NotFoundError, BadRequestError, ConflictError } from '../../shared/errors/index.js';
+
+type PaymentStatusValue = 'Unpaid' | 'Partially Paid' | 'Paid';
+
+/**
+ * Derives {orderStatus, paymentStatus} from totalPrice/advancePaid.
+ * Matches the spec exactly:
+ *  - advancePaid > 0 and < totalPrice -> Confirmed / Partially Paid
+ *  - advancePaid = 0, not forceConfirmed -> Pending / Unpaid
+ *  - advancePaid = 0, forceConfirmed -> Confirmed / Unpaid
+ *  - advancePaid = totalPrice -> Confirmed / Paid
+ *  - advancePaid > totalPrice -> reject, never a stored state
+ *
+ * `currentOrderStatus` lets this be reused for existing orders: payment can
+ * only ever PROMOTE order_status (Pending -> Confirmed), never regress an
+ * order already further along the production lifecycle (In Progress/Ready/
+ * Delivered) or touch a Cancelled order.
+ */
+function derivePaymentState(
+  totalPrice: number,
+  advancePaid: number,
+  forceConfirm: boolean,
+  currentOrderStatus?: OrderStatusValue,
+): { orderStatus: OrderStatusValue; paymentStatus: PaymentStatusValue } {
+  if (advancePaid > totalPrice) {
+    throw new BadRequestError('Advance paid cannot exceed total price.');
+  }
+
+  const paymentStatus: PaymentStatusValue =
+    advancePaid === 0 ? 'Unpaid' : advancePaid === totalPrice ? 'Paid' : 'Partially Paid';
+
+  const shouldBeAtLeastConfirmed = advancePaid > 0 || forceConfirm;
+  const alreadyProgressed =
+    currentOrderStatus === 'In Progress' ||
+    currentOrderStatus === 'Ready' ||
+    currentOrderStatus === 'Delivered' ||
+    currentOrderStatus === 'Cancelled';
+
+  let orderStatus: OrderStatusValue;
+  if (alreadyProgressed) {
+    orderStatus = currentOrderStatus as OrderStatusValue;
+  } else {
+    orderStatus = shouldBeAtLeastConfirmed ? 'Confirmed' : 'Pending';
+  }
+
+  return { orderStatus, paymentStatus };
+}
 
 export class OrdersService {
   /**
@@ -14,88 +59,80 @@ export class OrdersService {
    */
   async createOrder(bakerId: string, payload: CreateOrderPayload) {
     return prisma.$transaction(async (tx) => {
-      // 1. Calculate balance due server-side
       const total = payload.payment.totalPrice;
       const advance = payload.payment.advancePaid;
       const balance = total - advance;
 
-      let initialPaymentStatus: import('@prisma/client').PaymentStatus = 'UNPAID';
-      if (advance > 0 && balance > 0) {
-        initialPaymentStatus = 'PARTIALLY_PAID';
-      } else if (balance === 0) {
-        initialPaymentStatus = 'PAID';
-      }
+      const { orderStatus, paymentStatus } = derivePaymentState(
+        total,
+        advance,
+        payload.payment.forceConfirm,
+      );
 
-      // 2. Combine date and time into a single UTC DateTime
-      const deliveryDate = new Date(`${payload.delivery.date}T${payload.delivery.time}:00`);
+      const deliveryCharge = payload.delivery.type === 'pickup' ? 0 : payload.delivery.charge ?? null;
 
-      // 3. Generate unique order number
-      const orderNumber = await orderNumberService.generateOrderNumber();
-
-      // 4. Upsert Customer
       const customer = await customersService.upsertCustomer(tx, bakerId, {
         name: payload.customer.name,
-        phone: payload.customer.phone,
+        phone: payload.customer.phone ?? null,
         address: payload.customer.address,
       });
 
-      // 5. Create Order
       const newOrder = await tx.order.create({
         data: {
-          orderNumber,
           bakerId,
           customerId: customer.id,
-          category: payload.cake.category,
-          weight: payload.cake.weight,
-          flavour: payload.cake.flavour,
-          referencePhoto: payload.referencePhoto,
-          deliveryDate,
+          cakeCategory: payload.cake.category,
+          cakeFlavour: payload.cake.flavour,
+          weightInPounds: payload.cake.weightInPounds,
+          quantity: payload.cake.quantity,
+          occasion: payload.occasion,
+          customInstructions: payload.customInstructions,
+          deliveryType: payload.delivery.type,
+          deliveryDate: new Date(`${payload.delivery.date}T00:00:00.000Z`),
+          deliveryTime: payload.delivery.time
+            ? new Date(`1970-01-01T${payload.delivery.time}:00.000Z`)
+            : null,
+          deliveryCharge,
           totalPrice: total,
           advancePaid: advance,
           balanceDue: balance,
-          paymentStatus: initialPaymentStatus,
-          status: 'PENDING',
+          orderStatus,
+          paymentStatus,
+          referencePhotoUrl: payload.referencePhotoUrl,
+          internalNotes: payload.internalNotes,
+          customFields: payload.customFields,
         },
         include: { customer: true },
       });
 
-      // 6. Initialize Payment Ledger (if advance paid)
       if (advance > 0) {
         await financeService.recordTransaction(tx, {
           bakerId,
           orderId: newOrder.id,
-          orderNumber: newOrder.orderNumber,
           amount: advance,
-          type: 'CREDIT',
-          paymentMode: 'CASH',
-          transactionReference: 'ADVANCE',
+          eventType: 'advance_received',
+          paymentMode: payload.payment.paymentMethod,
         });
       }
 
-      // 7. Audit Log
       await auditService.logEvent('ORDER_CREATED', newOrder.id, {
         bakerId,
         orderId: newOrder.id,
-        orderNumber: newOrder.orderNumber,
-        status: newOrder.status,
+        orderNumber: newOrder.displayId,
+        status: newOrder.orderStatus,
       });
-
-      // 8. Recalculate CRM Metrics
-      await customersService.recalculateMetrics(tx, customer.id);
-
-      // 9. Invalidate Dashboard Cache
       await cacheService.invalidateDashboardSummary(bakerId);
 
       return {
         orderId: newOrder.id,
-        orderNumber: newOrder.orderNumber,
+        orderNumber: newOrder.displayId,
         customerName: newOrder.customer.name,
-        deliveryDate: newOrder.deliveryDate.toISOString(),
-        totalPrice: newOrder.totalPrice,
-        advancePaid: newOrder.advancePaid,
-        balanceDue: newOrder.balanceDue,
+        deliveryDate: newOrder.deliveryDate.toISOString().slice(0, 10),
+        totalPrice: Number(newOrder.totalPrice),
+        advancePaid: Number(newOrder.advancePaid),
+        balanceDue: Number(newOrder.balanceDue),
         paymentStatus: newOrder.paymentStatus,
-        status: newOrder.status,
+        status: newOrder.orderStatus,
         createdAt: newOrder.createdAt.toISOString(),
       };
     });
@@ -103,7 +140,6 @@ export class OrdersService {
 
   /**
    * Retrieves a paginated list of orders for a baker.
-   * Applies filtering based on status, search string, and dates.
    */
   async getOrders(bakerId: string, query: import('./orders.schemas.js').GetOrdersQuery) {
     const { page, limit, status, search, deliveryDate, from, to, sort, order } = query;
@@ -111,53 +147,41 @@ export class OrdersService {
     const limitVal = Number(limit || 20);
     const skip = (pageVal - 1) * limitVal;
 
-    // 1. Build dynamic 'where' clause
     const where: import('@prisma/client').Prisma.OrderWhereInput = {
       bakerId,
-      deletedAt: null,
     };
 
-    // Filter by status (default: exclude CANCELLED unless explicitly requested)
+    // Default: exclude Cancelled unless explicitly requested
     if (status) {
-      where.status = status;
+      where.orderStatus = status;
     } else {
-      where.status = { not: 'CANCELLED' };
+      where.orderStatus = { not: 'Cancelled' };
     }
 
-    // Filter by search (customer name, phone, orderNumber)
     if (search) {
       where.OR = [
-        { orderNumber: { contains: search, mode: 'insensitive' } },
+        { displayId: { contains: search, mode: 'insensitive' } },
         { customer: { name: { contains: search, mode: 'insensitive' } } },
         { customer: { phone: { contains: search } } },
       ];
     }
 
-    // Filter by date
     if (deliveryDate) {
-      // Exact day match
-      where.deliveryDate = {
-        gte: new Date(`${deliveryDate}T00:00:00.000Z`),
-        lte: new Date(`${deliveryDate}T23:59:59.999Z`),
-      };
+      where.deliveryDate = new Date(`${deliveryDate}T00:00:00.000Z`);
     } else if (from || to) {
-      // Date range match
       where.deliveryDate = {};
       if (from) where.deliveryDate.gte = new Date(`${from}T00:00:00.000Z`);
-      if (to) where.deliveryDate.lte = new Date(`${to}T23:59:59.999Z`);
+      if (to) where.deliveryDate.lte = new Date(`${to}T00:00:00.000Z`);
     }
 
-    // 2. Build multi-sort
-    // Note: Prisma accepts an array for multiple order-by clauses
-    const orderBy: import('@prisma/client').Prisma.OrderOrderByWithRelationInput[] = [];
-    orderBy.push({ [sort]: order });
-
-    // Tie-breaker: If they aren't already sorting by createdAt, use it as secondary
+    const sortFieldMap = { deliveryDate: 'deliveryDate', createdAt: 'createdAt', totalPrice: 'totalPrice' } as const;
+    const orderBy: import('@prisma/client').Prisma.OrderOrderByWithRelationInput[] = [
+      { [sortFieldMap[sort]]: order },
+    ];
     if (sort !== 'createdAt') {
       orderBy.push({ createdAt: 'desc' });
     }
 
-    // 3. Execute queries within a transaction
     const [totalItems, orders] = await prisma.$transaction([
       prisma.order.count({ where }),
       prisma.order.findMany({
@@ -167,17 +191,12 @@ export class OrdersService {
         orderBy,
         select: {
           id: true,
-          orderNumber: true,
+          displayId: true,
           deliveryDate: true,
-          status: true,
+          orderStatus: true,
           totalPrice: true,
           balanceDue: true,
-          customer: {
-            select: {
-              name: true,
-              phone: true,
-            },
-          },
+          customer: { select: { name: true, phone: true } },
         },
       }),
     ]);
@@ -187,13 +206,13 @@ export class OrdersService {
     return {
       orders: orders.map((o) => ({
         orderId: o.id,
-        orderNumber: o.orderNumber,
+        orderNumber: o.displayId,
         customerName: o.customer.name,
         phone: o.customer.phone,
-        deliveryDate: o.deliveryDate,
-        status: o.status,
-        totalPrice: o.totalPrice,
-        balanceDue: o.balanceDue,
+        deliveryDate: o.deliveryDate.toISOString().slice(0, 10),
+        status: o.orderStatus,
+        totalPrice: Number(o.totalPrice),
+        balanceDue: Number(o.balanceDue),
       })),
       pagination: {
         page: pageVal,
@@ -207,114 +226,90 @@ export class OrdersService {
   }
 
   /**
-   * Fetches the complete details for a specific order.
-   * Ensures the order belongs to the authenticated baker.
+   * Fetches the complete details for a specific order (looked up by displayId).
    */
   async getOrderDetails(bakerId: string, orderNumber: string) {
-    const order = await prisma.order.findUnique({
-      where: {
-        orderNumber,
-        bakerId,
-      },
-      include: {
-        customer: true,
-      },
+    const order = await prisma.order.findFirst({
+      where: { displayId: orderNumber, bakerId },
+      include: { customer: true },
     });
 
-    if (!order || order.deletedAt !== null) {
+    if (!order) {
       return null;
     }
 
     return {
-      orderId: order.orderNumber, // Returning orderNumber as requested in DTO example
-      status: order.status,
+      orderId: order.displayId,
+      status: order.orderStatus,
       customer: {
         name: order.customer.name,
         phone: order.customer.phone,
         address: order.customer.address,
       },
       cake: {
-        category: order.category,
-        weight: order.weight,
-        flavour: order.flavour,
+        category: order.cakeCategory,
+        flavour: order.cakeFlavour,
+        weightInPounds: order.weightInPounds ? Number(order.weightInPounds) : null,
+        quantity: order.quantity ? Number(order.quantity) : null,
       },
+      occasion: order.occasion,
+      customInstructions: order.customInstructions,
       delivery: {
-        date: order.deliveryDate.toISOString().slice(0, 10), // YYYY-MM-DD
-        time: order.deliveryDate.toISOString().slice(11, 16), // HH:mm
+        type: order.deliveryType,
+        date: order.deliveryDate.toISOString().slice(0, 10),
+        time: order.deliveryTime ? order.deliveryTime.toISOString().slice(11, 16) : null,
+        charge: order.deliveryCharge ? Number(order.deliveryCharge) : null,
       },
       payment: {
-        totalPrice: order.totalPrice,
-        advancePaid: order.advancePaid,
-        balanceDue: order.balanceDue,
+        totalPrice: Number(order.totalPrice),
+        advancePaid: Number(order.advancePaid),
+        balanceDue: Number(order.balanceDue),
+        paymentStatus: order.paymentStatus,
       },
-      referencePhoto: order.referencePhoto,
+      referencePhotoUrl: order.referencePhotoUrl,
+      internalNotes: order.internalNotes,
+      customFields: order.customFields,
     };
   }
 
   /**
    * Updates an order's status based on strict state machine rules.
    */
-  async updateOrderStatus(
-    bakerId: string,
-    orderNumber: string,
-    newStatus: import('@prisma/client').OrderStatus,
-  ) {
-    // 1. Fetch current order in a transaction to handle concurrency properly
+  async updateOrderStatus(bakerId: string, orderNumber: string, newStatus: OrderStatusValue) {
     return prisma.$transaction(async (tx) => {
-      const order = await tx.order.findUnique({
-        where: {
-          orderNumber,
-          bakerId,
-          deletedAt: null, // exclude soft-deleted
-        },
-        select: {
-          id: true,
-          orderNumber: true,
-          status: true,
-        },
+      const order = await tx.order.findFirst({
+        where: { displayId: orderNumber, bakerId },
+        select: { id: true, displayId: true, orderStatus: true },
       });
 
       if (!order) {
         throw new NotFoundError('Order not found');
       }
 
-      const previousStatus = order.status;
-
-      // 2. Validate state machine transition
+      const previousStatus = order.orderStatus as OrderStatusValue;
       statusValidationService.assertValidTransition(previousStatus, newStatus);
 
-      // 3. Update the order
       const updatedOrder = await tx.order.update({
         where: { id: order.id },
-        data: { status: newStatus },
-        select: {
-          id: true,
-          orderNumber: true,
-          status: true,
-          updatedAt: true,
-        },
+        data: { orderStatus: newStatus },
+        select: { id: true, displayId: true, orderStatus: true, updatedAt: true },
       });
 
-      // 4. Invalidate dashboard cache
       await cacheService.invalidateDashboardSummary(bakerId);
 
-      // 5. Audit Trail
       await auditService.logEvent('ORDER_STATUS_UPDATED', updatedOrder.id, {
         bakerId,
-        orderNumber: updatedOrder.orderNumber,
+        orderNumber: updatedOrder.displayId,
         previousStatus,
-        currentStatus: updatedOrder.status,
+        currentStatus: updatedOrder.orderStatus,
         timestamp: updatedOrder.updatedAt.toISOString(),
       });
 
-      // TODO: If updatedOrder.status === 'READY', enable WhatsApp Notification hook
-      // TODO: If updatedOrder.status === 'DELIVERED', enable Payment Reconciliation hook
-
       return {
         orderId: updatedOrder.id,
-        orderNumber: updatedOrder.orderNumber,
+        orderNumber: updatedOrder.displayId,
         previousStatus,
-        currentStatus: updatedOrder.status,
+        currentStatus: updatedOrder.orderStatus,
         updatedAt: updatedOrder.updatedAt.toISOString(),
       };
     });
@@ -322,24 +317,19 @@ export class OrdersService {
 
   /**
    * Records a payment against the balance of an order.
-   * Executes securely within a transaction to prevent race conditions.
    */
   async recordPayment(bakerId: string, orderNumber: string, payload: RecordPaymentBody) {
     return prisma.$transaction(async (tx) => {
-      // 1. Fetch current order state
-      const order = await tx.order.findUnique({
-        where: {
-          orderNumber,
-          bakerId,
-          deletedAt: null,
-        },
+      const order = await tx.order.findFirst({
+        where: { displayId: orderNumber, bakerId },
         select: {
           id: true,
-          orderNumber: true,
+          displayId: true,
           totalPrice: true,
           advancePaid: true,
           balanceDue: true,
           paymentStatus: true,
+          orderStatus: true,
         },
       });
 
@@ -347,8 +337,11 @@ export class OrdersService {
         throw new NotFoundError('Order not found');
       }
 
-      // 2. Business Validations
-      if (order.balanceDue === 0 || order.paymentStatus === 'PAID') {
+      const totalPrice = Number(order.totalPrice);
+      const previousAdvancePaid = Number(order.advancePaid);
+      const balanceDue = Number(order.balanceDue);
+
+      if (balanceDue === 0 || order.paymentStatus === 'Paid') {
         throw new ConflictError('No outstanding balance on this order.');
       }
 
@@ -358,64 +351,63 @@ export class OrdersService {
         throw new BadRequestError('Payment amount must be greater than 0.');
       }
 
-      if (amount > order.balanceDue) {
+      if (amount > balanceDue) {
         throw new BadRequestError('Payment exceeds outstanding balance.');
       }
 
-      // 3. Calculate new values
-      const newAdvancePaid = order.advancePaid + amount;
-      const newBalanceDue = order.balanceDue - amount;
-      const newPaymentStatus = newBalanceDue === 0 ? 'PAID' : 'PARTIALLY_PAID';
+      const newAdvancePaid = previousAdvancePaid + amount;
+      const newBalanceDue = totalPrice - newAdvancePaid;
 
-      // 4. Update the order
+      const { orderStatus, paymentStatus } = derivePaymentState(
+        totalPrice,
+        newAdvancePaid,
+        false,
+        order.orderStatus as OrderStatusValue,
+      );
+
       const updatedOrder = await tx.order.update({
         where: { id: order.id },
         data: {
           advancePaid: newAdvancePaid,
           balanceDue: newBalanceDue,
-          paymentStatus: newPaymentStatus,
+          paymentStatus,
+          orderStatus,
         },
-        select: {
-          id: true,
-          orderNumber: true,
-          balanceDue: true,
-          paymentStatus: true,
-        },
+        select: { id: true, displayId: true, balanceDue: true, paymentStatus: true, orderStatus: true },
       });
 
-      // 5. Insert Payment Ledger Entry
+      // The first money received on an order is the advance; anything after is a balance payment.
+      const eventType = previousAdvancePaid === 0 ? 'advance_received' : 'balance_received';
+
       const ledgerEntry = await financeService.recordTransaction(tx, {
         bakerId,
         orderId: updatedOrder.id,
-        orderNumber: updatedOrder.orderNumber,
-        amount: amount,
-        type: 'CREDIT',
+        amount,
+        eventType,
         paymentMode: payload.paymentMethod,
         transactionReference: payload.transactionReference,
       });
 
-      // 6. Insert Audit Log
       await auditService.logEvent('PAYMENT_RECORDED', updatedOrder.id, {
         bakerId,
-        orderNumber: updatedOrder.orderNumber,
-        amount: amount,
+        orderNumber: updatedOrder.displayId,
+        amount,
         paymentMode: payload.paymentMethod,
         paymentStatus: updatedOrder.paymentStatus,
-        timestamp: ledgerEntry.transactionDate.toISOString(),
+        timestamp: ledgerEntry.occurredAt.toISOString(),
       });
 
-      // 7. Invalidate dashboard cache
       await cacheService.invalidateDashboardSummary(bakerId);
 
-      // Return unified response
       return {
         orderId: updatedOrder.id,
-        orderNumber: updatedOrder.orderNumber,
+        orderNumber: updatedOrder.displayId,
         amountReceived: amount,
-        balanceDue: updatedOrder.balanceDue,
+        balanceDue: Number(updatedOrder.balanceDue),
         paymentStatus: updatedOrder.paymentStatus,
+        orderStatus: updatedOrder.orderStatus,
         paymentMethod: payload.paymentMethod,
-        transactionDate: ledgerEntry.transactionDate.toISOString(),
+        transactionDate: ledgerEntry.occurredAt.toISOString(),
       };
     });
   }
@@ -425,9 +417,8 @@ export class OrdersService {
    */
   async updateOrder(bakerId: string, orderNumber: string, payload: UpdateOrderBody) {
     return prisma.$transaction(async (tx) => {
-      // 1. Fetch current order with customer
-      const order = await tx.order.findUnique({
-        where: { orderNumber, bakerId, deletedAt: null },
+      const order = await tx.order.findFirst({
+        where: { displayId: orderNumber, bakerId },
         include: { customer: true },
       });
 
@@ -435,19 +426,13 @@ export class OrdersService {
         throw new NotFoundError('Order not found');
       }
 
-      // 2. Validate Order Status
-      if (order.status === 'DELIVERED' || order.status === 'CANCELLED') {
-        throw new ConflictError(`Cannot edit an order in ${order.status} state.`);
+      if (order.orderStatus === 'Delivered' || order.orderStatus === 'Cancelled') {
+        throw new ConflictError(`Cannot edit an order in ${order.orderStatus} state.`);
       }
 
-      // 3. Handle Customer Update
-      // Use customersService to securely upsert and log customer modifications
-      if (order.customer.phone !== payload.customer.phone) {
-        // Just verify there's no conflict with another customer before letting upsertCustomer do its thing
+      if (payload.customer.phone && order.customer.phone !== payload.customer.phone) {
         const existingCustomer = await tx.customer.findUnique({
-          where: {
-            bakerId_phone: { bakerId, phone: payload.customer.phone },
-          },
+          where: { bakerId_phone: { bakerId, phone: payload.customer.phone } },
         });
 
         if (existingCustomer) {
@@ -455,64 +440,68 @@ export class OrdersService {
         }
       }
 
-      const updatedCustomer = await customersService.upsertCustomer(tx, bakerId, payload.customer);
+      await customersService.upsertCustomer(tx, bakerId, {
+        name: payload.customer.name,
+        phone: payload.customer.phone ?? null,
+        address: payload.customer.address,
+      });
 
-      // 4. Calculate Delivery Date
-      const deliveryDate = new Date(`${payload.delivery.date}T${payload.delivery.time}:00.000Z`);
-
-      // 5. Calculate Financials
       const total = payload.payment.totalPrice;
       const advance = payload.payment.advancePaid;
       const balance = total - advance;
 
-      let paymentStatus: import('@prisma/client').PaymentStatus = 'UNPAID';
-      if (advance > 0 && balance > 0) {
-        paymentStatus = 'PARTIALLY_PAID';
-      } else if (balance === 0) {
-        paymentStatus = 'PAID';
-      }
+      const { orderStatus, paymentStatus } = derivePaymentState(
+        total,
+        advance,
+        false,
+        order.orderStatus as OrderStatusValue,
+      );
 
-      // 6. Update Order
+      const deliveryCharge = payload.delivery.type === 'pickup' ? 0 : payload.delivery.charge ?? null;
+
       const updatedOrder = await tx.order.update({
         where: { id: order.id },
         data: {
-          category: payload.cake.category,
-          weight: payload.cake.weight,
-          flavour: payload.cake.flavour,
-          deliveryDate,
+          cakeCategory: payload.cake.category,
+          cakeFlavour: payload.cake.flavour,
+          weightInPounds: payload.cake.weightInPounds,
+          quantity: payload.cake.quantity,
+          occasion: payload.occasion,
+          customInstructions: payload.customInstructions,
+          deliveryType: payload.delivery.type,
+          deliveryDate: new Date(`${payload.delivery.date}T00:00:00.000Z`),
+          deliveryTime: payload.delivery.time
+            ? new Date(`1970-01-01T${payload.delivery.time}:00.000Z`)
+            : null,
+          deliveryCharge,
           totalPrice: total,
           advancePaid: advance,
           balanceDue: balance,
+          orderStatus,
           paymentStatus,
-          referencePhoto: payload.referencePhoto ?? null,
+          referencePhotoUrl: payload.referencePhotoUrl ?? null,
+          internalNotes: payload.internalNotes,
+          customFields: payload.customFields,
         },
         include: { customer: true },
       });
 
-      // 7. Audit Log
-      // Assuming a simplistic diff by capturing the new payload values
       await auditService.logEvent('ORDER_UPDATED', updatedOrder.id, {
         bakerId,
         orderNumber,
         fieldsChanged: Object.keys(payload),
         updatedAt: updatedOrder.updatedAt.toISOString(),
       });
-
-      // 8. Recalculate CRM Metrics
-      await customersService.recalculateMetrics(tx, updatedCustomer.id);
-
-      // 9. Invalidate Dashboard Cache
       await cacheService.invalidateDashboardSummary(bakerId);
 
-      // Return unified response
       return {
         orderId: updatedOrder.id,
-        orderNumber: updatedOrder.orderNumber,
+        orderNumber: updatedOrder.displayId,
         customerName: updatedOrder.customer.name,
-        deliveryDate: updatedOrder.deliveryDate.toISOString(),
-        totalPrice: updatedOrder.totalPrice,
-        advancePaid: updatedOrder.advancePaid,
-        balanceDue: updatedOrder.balanceDue,
+        deliveryDate: updatedOrder.deliveryDate.toISOString().slice(0, 10),
+        totalPrice: Number(updatedOrder.totalPrice),
+        advancePaid: Number(updatedOrder.advancePaid),
+        balanceDue: Number(updatedOrder.balanceDue),
         paymentStatus: updatedOrder.paymentStatus,
         updatedAt: updatedOrder.updatedAt.toISOString(),
       };
@@ -520,65 +509,46 @@ export class OrdersService {
   }
 
   /**
-   * Cancels and archives an order (Action 10).
+   * Cancels an order (order_status = Cancelled). No separate soft-delete —
+   * Cancelled is a real, filterable order_status value.
    */
   async cancelOrder(bakerId: string, orderNumber: string) {
     return prisma.$transaction(async (tx) => {
-      // 1. Fetch current order
-      const order = await tx.order.findUnique({
-        where: { orderNumber, bakerId, deletedAt: null },
+      const order = await tx.order.findFirst({
+        where: { displayId: orderNumber, bakerId },
       });
 
       if (!order) {
         throw new NotFoundError('Order not found');
       }
 
-      // 2. Validate Order Status
-      if (order.status === 'DELIVERED') {
-        throw new ConflictError(
-          'Delivered orders cannot be cancelled.',
-          'ORDER_ALREADY_DELIVERED',
-        );
+      if (order.orderStatus === 'Delivered') {
+        throw new ConflictError('Delivered orders cannot be cancelled.', 'ORDER_ALREADY_DELIVERED');
       }
 
-      if (order.status === 'CANCELLED') {
-        throw new ConflictError(
-          'Order is already cancelled.',
-          'ORDER_ALREADY_CANCELLED',
-        );
+      if (order.orderStatus === 'Cancelled') {
+        throw new ConflictError('Order is already cancelled.', 'ORDER_ALREADY_CANCELLED');
       }
 
-      // 3. Update Order (Soft Delete + Cancel)
       const now = new Date();
       const updatedOrder = await tx.order.update({
         where: { id: order.id },
-        data: {
-          status: 'CANCELLED',
-          deletedAt: now,
-          updatedAt: now,
-        },
+        data: { orderStatus: 'Cancelled', updatedAt: now },
       });
 
-      // 4. Audit Log
       await auditService.logEvent('ORDER_CANCELLED', updatedOrder.id, {
         bakerId,
         orderId: updatedOrder.id,
         orderNumber,
-        previousStatus: order.status,
+        previousStatus: order.orderStatus,
         cancelledAt: now.toISOString(),
         cancelledBy: bakerId,
       });
-
-      // 5. Recalculate CRM Metrics
-      await customersService.recalculateMetrics(tx, order.customerId);
-
-      // 6. Invalidate Dashboard Cache
       await cacheService.invalidateDashboardSummary(bakerId);
 
-      // Return success envelope payload
       return {
-        orderNumber: updatedOrder.orderNumber,
-        status: updatedOrder.status,
+        orderNumber: updatedOrder.displayId,
+        status: updatedOrder.orderStatus,
         cancelledAt: now.toISOString(),
         message: 'Order cancelled successfully.',
       };

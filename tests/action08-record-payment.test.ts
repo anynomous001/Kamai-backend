@@ -21,21 +21,22 @@ describe('Action 8 E2E: Record Balance Payment', () => {
 
     await prisma.order.create({
       data: {
-        orderNumber: 'ORD-PAY-001',
+        displayId: 'ORD-PAY-001',
         baker: { connect: { id: 'test-baker-id' } },
-        category: 'Cake',
-        weight: '2kg',
-        flavour: 'Nutella',
+        cakeCategory: 'Cake',
+        cakeFlavour: 'Nutella',
+        deliveryType: 'pickup',
         deliveryDate: new Date(),
-        totalPrice: 200000,
-        advancePaid: 50000,
-        balanceDue: 150000,
-        paymentStatus: 'PARTIALLY_PAID',
+        totalPrice: 2000,
+        advancePaid: 500,
+        balanceDue: 1500,
+        orderStatus: 'Confirmed',
+        paymentStatus: 'Partially Paid',
         customer: {
           create: {
             bakerId: 'test-baker-id',
             name: 'Payment Cust',
-            phone: '+919999999996',
+            phone: '9999999996',
           },
         },
       },
@@ -53,7 +54,7 @@ describe('Action 8 E2E: Record Balance Payment', () => {
       method: 'PATCH',
       url: '/api/orders/ORD-PAY-001/payment',
       payload: {
-        amountReceived: 100000, // 1000 INR
+        amountReceived: 1000,
         paymentMethod: 'UPI',
         transactionReference: 'TXN-1234',
       },
@@ -62,16 +63,16 @@ describe('Action 8 E2E: Record Balance Payment', () => {
     expect(response.statusCode).toBe(200);
     const body = JSON.parse(response.body);
     expect(body.success).toBe(true);
-    expect(body.data.balanceDue).toBe(50000);
-    expect(body.data.paymentStatus).toBe('PARTIALLY_PAID');
+    expect(body.data.balanceDue).toBe(500);
+    expect(body.data.paymentStatus).toBe('Partially Paid');
   });
 
-  it('should successfully record final balance payment and mark as PAID', async () => {
+  it('should successfully record final balance payment and mark as Paid', async () => {
     const response = await app.inject({
       method: 'PATCH',
       url: '/api/orders/ORD-PAY-001/payment',
       payload: {
-        amountReceived: 50000, // remaining balance
+        amountReceived: 500, // remaining balance
         paymentMethod: 'CASH',
       },
     });
@@ -80,6 +81,6 @@ describe('Action 8 E2E: Record Balance Payment', () => {
     const body = JSON.parse(response.body);
     expect(body.success).toBe(true);
     expect(body.data.balanceDue).toBe(0);
-    expect(body.data.paymentStatus).toBe('PAID');
+    expect(body.data.paymentStatus).toBe('Paid');
   });
 });

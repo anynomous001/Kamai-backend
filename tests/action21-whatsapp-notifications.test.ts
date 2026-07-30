@@ -22,20 +22,22 @@ describe('Action 21 E2E: WhatsApp Notifications Link Generation', () => {
 
     const order = await prisma.order.create({
       data: {
-        orderNumber: 'ORD-NOT-001',
+        displayId: 'ORD-NOT-001',
         baker: { connect: { id: 'test-baker-id' } },
-        category: 'Cake',
-        weight: '1kg',
-        flavour: 'Marble',
+        cakeCategory: 'Cake',
+        cakeFlavour: 'Marble',
+        deliveryType: 'pickup',
         deliveryDate: new Date(),
-        totalPrice: 100000,
-        advancePaid: 50000,
-        balanceDue: 50000,
+        totalPrice: 1000,
+        advancePaid: 500,
+        balanceDue: 500,
+        orderStatus: 'Confirmed',
+        paymentStatus: 'Partially Paid',
         customer: {
           create: {
             bakerId: 'test-baker-id',
             name: 'Notify Cust',
-            phone: '+919999999990',
+            phone: '9999999990',
           },
         },
       },

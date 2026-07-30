@@ -1,40 +1,52 @@
 import { z } from 'zod';
 
+const ORDER_STATUS_VALUES = ['Pending', 'Confirmed', 'In Progress', 'Ready', 'Delivered', 'Cancelled'] as const;
+const DELIVERY_TYPE_VALUES = ['pickup', 'delivery'] as const;
+const PAYMENT_MODE_VALUES = ['CASH', 'UPI', 'CARD', 'BANK_TRANSFER'] as const;
+
+export const CustomFieldSchema = z.object({
+  label: z.string().min(1),
+  value: z.string().min(1),
+});
+
+// ── POST /api/orders (Create Order) ─────────────────────────────────
+
 export const CreateOrderPayloadSchema = z.object({
   customer: z.object({
     name: z.string().min(1),
-    phone: z.string().min(1),
+    phone: z.string().min(1).nullable().optional(), // nullable — real intake often has no phone
     address: z.string().optional(),
   }),
   cake: z.object({
     category: z.string().min(1),
-    weight: z.string().min(1),
     flavour: z.string().min(1),
+    weightInPounds: z.number().positive().optional(),
+    quantity: z.number().positive().optional(),
   }),
+  occasion: z.string().optional(),
+  customInstructions: z.string().optional(),
   delivery: z.object({
-    date: z.string(), // "2026-07-30"
-    time: z.string(), // "18:00"
+    type: z.enum(DELIVERY_TYPE_VALUES),
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD'),
+    time: z.string().regex(/^\d{2}:\d{2}$/, 'Must be HH:MM').optional(),
+    charge: z.number().min(0).optional(), // coerced to 0 for pickup at the service layer
   }),
   payment: z.object({
-    totalPrice: z.number().int().min(0),
-    advancePaid: z.number().int().min(0),
+    totalPrice: z.number().positive(),
+    advancePaid: z.number().min(0).default(0),
+    paymentMethod: z.enum(PAYMENT_MODE_VALUES).default('CASH'), // how the advance (if any) was collected
+    forceConfirm: z.boolean().default(false), // set order_status = Confirmed even with advancePaid = 0; not persisted
   }),
-  referencePhoto: z.string().url().nullable().optional(),
+  referencePhotoUrl: z.string().url().nullable().optional(),
+  internalNotes: z.string().optional(),
+  customFields: z.array(CustomFieldSchema).max(10).optional(),
+}).refine((data) => data.payment.advancePaid <= data.payment.totalPrice, {
+  message: 'Advance paid cannot exceed total price',
+  path: ['payment', 'advancePaid'],
 });
 
 export type CreateOrderPayload = z.infer<typeof CreateOrderPayloadSchema>;
 
-export const CreateOrderResponseSchema = z.object({
-  success: z.boolean(),
-  data: z.object({
-    orderId: z.string().uuid(),
-    orderNumber: z.string(),
-    balanceDue: z.number().int(),
-    status: z.string(),
-  }),
-});
-
-// JSON Schema for Swagger documentation
 export const createOrderJsonSchema = {
   description: 'Create a new order and upsert the customer in a single transaction',
   tags: ['Orders'],
@@ -45,39 +57,60 @@ export const createOrderJsonSchema = {
     properties: {
       customer: {
         type: 'object',
-        required: ['name', 'phone'],
+        required: ['name'],
         properties: {
           name: { type: 'string' },
-          phone: { type: 'string' },
+          // AJV's `pattern` keyword only applies when the instance is a
+          // string, so a `null` phone (no-phone-on-file customers) still
+          // passes — matches CreateOrderPayloadSchema's regex, which this
+          // JSON schema is the actual runtime enforcement for (that Zod
+          // schema is never .parse()'d anywhere; it's type-inference only).
+          phone: { type: ['string', 'null'], pattern: '^[6-9]\\d{9}$' },
           address: { type: 'string' },
         },
       },
       cake: {
         type: 'object',
-        required: ['category', 'weight', 'flavour'],
+        required: ['category', 'flavour'],
         properties: {
           category: { type: 'string' },
-          weight: { type: 'string' },
           flavour: { type: 'string' },
+          weightInPounds: { type: 'number', exclusiveMinimum: 0 },
+          quantity: { type: 'number', exclusiveMinimum: 0 },
         },
       },
+      occasion: { type: 'string' },
+      customInstructions: { type: 'string' },
       delivery: {
         type: 'object',
-        required: ['date', 'time'],
+        required: ['type', 'date'],
         properties: {
+          type: { type: 'string', enum: DELIVERY_TYPE_VALUES as unknown as string[] },
           date: { type: 'string' },
           time: { type: 'string' },
+          charge: { type: 'number', minimum: 0 },
         },
       },
       payment: {
         type: 'object',
-        required: ['totalPrice', 'advancePaid'],
+        required: ['totalPrice'],
         properties: {
-          totalPrice: { type: 'integer' },
-          advancePaid: { type: 'integer' },
+          totalPrice: { type: 'number', exclusiveMinimum: 0 },
+          advancePaid: { type: 'number', minimum: 0, default: 0 },
+          paymentMethod: { type: 'string', enum: PAYMENT_MODE_VALUES as unknown as string[], default: 'CASH' },
+          forceConfirm: { type: 'boolean', default: false },
         },
       },
-      referencePhoto: { type: 'string', nullable: true },
+      referencePhotoUrl: { type: 'string', nullable: true },
+      internalNotes: { type: 'string' },
+      customFields: {
+        type: 'array',
+        maxItems: 10,
+        items: {
+          type: 'object',
+          properties: { label: { type: 'string' }, value: { type: 'string' } },
+        },
+      },
     },
   },
   response: {
@@ -90,9 +123,9 @@ export const createOrderJsonSchema = {
           type: 'object',
           properties: {
             orderId: { type: 'string', format: 'uuid' },
-            orderNumber: { type: 'string', example: 'ORD-20260726-00001' },
-            balanceDue: { type: 'integer', example: 1300 },
-            status: { type: 'string', example: 'PENDING' },
+            orderNumber: { type: 'string', example: 'ORD-000001' },
+            balanceDue: { type: 'number', example: 1300 },
+            status: { type: 'string' },
           },
         },
       },
@@ -105,7 +138,7 @@ export const createOrderJsonSchema = {
 export const GetOrdersQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
-  status: z.enum(['PENDING', 'CONFIRMED', 'IN_PROGRESS', 'READY', 'DELIVERED', 'CANCELLED']).optional(),
+  status: z.enum(ORDER_STATUS_VALUES).optional(),
   search: z.string().optional(),
   deliveryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
@@ -119,7 +152,6 @@ export const GetOrdersQuerySchema = z.object({
 
 export type GetOrdersQuery = z.infer<typeof GetOrdersQuerySchema>;
 
-// JSON Schema for Swagger documentation
 export const getOrdersJsonSchema = {
   description: 'Retrieve paginated order history with filtering and sorting',
   tags: ['Orders'],
@@ -129,15 +161,11 @@ export const getOrdersJsonSchema = {
     properties: {
       page: { type: ['integer', 'string'], default: 1 },
       limit: { type: ['integer', 'string'], default: 20 },
-      status: { 
-        type: 'string', 
-        enum: ['PENDING', 'CONFIRMED', 'IN_PROGRESS', 'READY', 'DELIVERED', 'CANCELLED'],
-        description: 'Filter by exact order status',
-      },
+      status: { type: 'string', enum: ORDER_STATUS_VALUES as unknown as string[], description: 'Filter by exact order status; defaults to excluding Cancelled when omitted' },
       search: { type: 'string', description: 'Search customer name, phone, or order number' },
-      deliveryDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$', description: 'YYYY-MM-DD' },
-      from: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$', description: 'YYYY-MM-DD' },
-      to: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$', description: 'YYYY-MM-DD' },
+      deliveryDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+      from: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+      to: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
       sort: { type: 'string', enum: ['deliveryDate', 'createdAt', 'totalPrice'], default: 'deliveryDate' },
       order: { type: 'string', enum: ['asc', 'desc'], default: 'asc' },
     },
@@ -159,11 +187,11 @@ export const getOrdersJsonSchema = {
                   orderId: { type: 'string', format: 'uuid' },
                   orderNumber: { type: 'string' },
                   customerName: { type: 'string' },
-                  phone: { type: 'string' },
-                  deliveryDate: { type: 'string', format: 'date-time' },
+                  phone: { type: ['string', 'null'] },
+                  deliveryDate: { type: 'string', format: 'date' },
                   status: { type: 'string' },
-                  totalPrice: { type: 'integer' },
-                  balanceDue: { type: 'integer' },
+                  totalPrice: { type: 'number' },
+                  balanceDue: { type: 'number' },
                 },
               },
             },
@@ -193,44 +221,15 @@ export const GetOrderParamsSchema = z.object({
 
 export type GetOrderParams = z.infer<typeof GetOrderParamsSchema>;
 
-// Note: The response schema matches the DTO requested in Action 6
-export const GetOrderResponseSchema = z.object({
-  success: z.boolean(),
-  data: z.object({
-    orderId: z.string(), // e.g. ORD-10293
-    status: z.string(),
-    customer: z.object({
-      name: z.string(),
-      phone: z.string(),
-      address: z.string().nullable().optional(),
-    }),
-    cake: z.object({
-      category: z.string(),
-      weight: z.string(),
-      flavour: z.string(),
-    }),
-    delivery: z.object({
-      date: z.string(),
-      time: z.string(),
-    }),
-    payment: z.object({
-      totalPrice: z.number().int(),
-      advancePaid: z.number().int(),
-      balanceDue: z.number().int(),
-    }),
-    referencePhoto: z.string().nullable().optional(),
-  }),
-});
-
 export const getOrderJsonSchema = {
-  description: 'Retrieve complete order details by orderNumber',
+  description: 'Retrieve complete order details by orderNumber (display_id)',
   tags: ['Orders'],
   security: [{ cookieAuth: [] }],
   params: {
     type: 'object',
     required: ['orderNumber'],
     properties: {
-      orderNumber: { type: 'string', description: 'The public order number (e.g., ORD-20260726-00001)' },
+      orderNumber: { type: 'string', description: 'The public order code (e.g., ORD-000001)' },
     },
   },
   response: {
@@ -248,7 +247,7 @@ export const getOrderJsonSchema = {
               type: 'object',
               properties: {
                 name: { type: 'string' },
-                phone: { type: 'string' },
+                phone: { type: ['string', 'null'] },
                 address: { type: 'string', nullable: true },
               },
             },
@@ -256,26 +255,41 @@ export const getOrderJsonSchema = {
               type: 'object',
               properties: {
                 category: { type: 'string' },
-                weight: { type: 'string' },
                 flavour: { type: 'string' },
+                weightInPounds: { type: 'number', nullable: true },
+                quantity: { type: 'number', nullable: true },
               },
             },
+            occasion: { type: 'string', nullable: true },
+            customInstructions: { type: 'string', nullable: true },
             delivery: {
               type: 'object',
               properties: {
+                type: { type: 'string' },
                 date: { type: 'string' },
-                time: { type: 'string' },
+                time: { type: 'string', nullable: true },
+                charge: { type: 'number', nullable: true },
               },
             },
             payment: {
               type: 'object',
               properties: {
-                totalPrice: { type: 'integer' },
-                advancePaid: { type: 'integer' },
-                balanceDue: { type: 'integer' },
+                totalPrice: { type: 'number' },
+                advancePaid: { type: 'number' },
+                balanceDue: { type: 'number' },
+                paymentStatus: { type: 'string' },
               },
             },
-            referencePhoto: { type: 'string', nullable: true },
+            referencePhotoUrl: { type: 'string', nullable: true },
+            internalNotes: { type: 'string', nullable: true },
+            customFields: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: { label: { type: 'string' }, value: { type: 'string' } },
+              },
+              nullable: true,
+            },
           },
         },
       },
@@ -299,22 +313,11 @@ export const UpdateOrderStatusParamsSchema = z.object({
 });
 
 export const UpdateOrderStatusBodySchema = z.object({
-  status: z.enum(['PENDING', 'CONFIRMED', 'IN_PROGRESS', 'READY', 'DELIVERED', 'CANCELLED']),
+  status: z.enum(ORDER_STATUS_VALUES),
 });
 
 export type UpdateOrderStatusParams = z.infer<typeof UpdateOrderStatusParamsSchema>;
 export type UpdateOrderStatusBody = z.infer<typeof UpdateOrderStatusBodySchema>;
-
-export const UpdateOrderStatusResponseSchema = z.object({
-  success: z.boolean(),
-  data: z.object({
-    orderId: z.string(), // Maps to the DB UUID inside standard endpoints, but user asked for orderNumber here
-    orderNumber: z.string(),
-    previousStatus: z.string(),
-    currentStatus: z.string(),
-    updatedAt: z.string(),
-  }),
-});
 
 export const updateOrderStatusJsonSchema = {
   description: 'Update an order status along the production lifecycle',
@@ -323,19 +326,12 @@ export const updateOrderStatusJsonSchema = {
   params: {
     type: 'object',
     required: ['orderNumber'],
-    properties: {
-      orderNumber: { type: 'string' },
-    },
+    properties: { orderNumber: { type: 'string' } },
   },
   body: {
     type: 'object',
     required: ['status'],
-    properties: {
-      status: {
-        type: 'string',
-        enum: ['PENDING', 'CONFIRMED', 'IN_PROGRESS', 'READY', 'DELIVERED', 'CANCELLED'],
-      },
-    },
+    properties: { status: { type: 'string', enum: ORDER_STATUS_VALUES as unknown as string[] } },
   },
   response: {
     200: {
@@ -374,8 +370,8 @@ export const RecordPaymentParamsSchema = z.object({
 });
 
 export const RecordPaymentBodySchema = z.object({
-  amountReceived: z.number().int().positive('Amount must be greater than 0'),
-  paymentMethod: z.enum(['CASH', 'UPI', 'CARD', 'BANK_TRANSFER']),
+  amountReceived: z.number().positive('Amount must be greater than 0'),
+  paymentMethod: z.enum(PAYMENT_MODE_VALUES),
   transactionReference: z.string().optional(),
 });
 
@@ -389,16 +385,14 @@ export const recordPaymentJsonSchema = {
   params: {
     type: 'object',
     required: ['orderNumber'],
-    properties: {
-      orderNumber: { type: 'string' },
-    },
+    properties: { orderNumber: { type: 'string' } },
   },
   body: {
     type: 'object',
     required: ['amountReceived', 'paymentMethod'],
     properties: {
-      amountReceived: { type: 'integer', minimum: 1, description: 'Amount in paise' },
-      paymentMethod: { type: 'string', enum: ['CASH', 'UPI', 'CARD', 'BANK_TRANSFER'] },
+      amountReceived: { type: 'number', exclusiveMinimum: 0, description: 'Amount in rupees' },
+      paymentMethod: { type: 'string', enum: PAYMENT_MODE_VALUES as unknown as string[] },
       transactionReference: { type: 'string' },
     },
   },
@@ -413,9 +407,10 @@ export const recordPaymentJsonSchema = {
           properties: {
             orderId: { type: 'string', format: 'uuid' },
             orderNumber: { type: 'string' },
-            amountReceived: { type: 'integer' },
-            balanceDue: { type: 'integer' },
+            amountReceived: { type: 'number' },
+            balanceDue: { type: 'number' },
             paymentStatus: { type: 'string' },
+            orderStatus: { type: 'string' },
             paymentMethod: { type: 'string' },
             transactionDate: { type: 'string', format: 'date-time' },
           },
@@ -425,20 +420,12 @@ export const recordPaymentJsonSchema = {
     400: {
       description: 'Invalid payment amount',
       type: 'object',
-      properties: {
-        statusCode: { type: 'integer' },
-        error: { type: 'string' },
-        message: { type: 'string' },
-      },
+      properties: { statusCode: { type: 'integer' }, error: { type: 'string' }, message: { type: 'string' } },
     },
     409: {
       description: 'Order already paid',
       type: 'object',
-      properties: {
-        success: { type: 'boolean' },
-        message: { type: 'string' },
-        errorCode: { type: 'string' },
-      },
+      properties: { success: { type: 'boolean' }, message: { type: 'string' }, errorCode: { type: 'string' } },
     },
   },
 };
@@ -452,23 +439,30 @@ export const UpdateOrderParamsSchema = z.object({
 export const UpdateOrderBodySchema = z.object({
   customer: z.object({
     name: z.string().min(1, 'Customer name is required'),
-    phone: z.string().regex(/^\d{10}$/, 'Phone number must be exactly 10 digits'),
+    phone: z.string().regex(/^[6-9]\d{9}$/, 'Must be a valid 10-digit Indian mobile number').nullable().optional(),
     address: z.string().optional(),
   }),
   cake: z.object({
     category: z.string().min(1, 'Cake category is required'),
-    weight: z.string().min(1, 'Cake weight is required'),
     flavour: z.string().min(1, 'Cake flavour is required'),
+    weightInPounds: z.number().positive().optional(),
+    quantity: z.number().positive().optional(),
   }),
+  occasion: z.string().optional(),
+  customInstructions: z.string().optional(),
   delivery: z.object({
+    type: z.enum(DELIVERY_TYPE_VALUES),
     date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Delivery date must be YYYY-MM-DD'),
-    time: z.string().regex(/^\d{2}:\d{2}$/, 'Delivery time must be HH:MM'),
+    time: z.string().regex(/^\d{2}:\d{2}$/, 'Delivery time must be HH:MM').optional(),
+    charge: z.number().min(0).optional(),
   }),
   payment: z.object({
-    totalPrice: z.number().int().min(0, 'Total price cannot be negative'),
-    advancePaid: z.number().int().min(0, 'Advance paid cannot be negative'),
+    totalPrice: z.number().positive('Total price must be greater than 0'),
+    advancePaid: z.number().min(0, 'Advance paid cannot be negative'),
   }),
-  referencePhoto: z.string().url().nullable().optional(),
+  referencePhotoUrl: z.string().url().nullable().optional(),
+  internalNotes: z.string().optional(),
+  customFields: z.array(CustomFieldSchema).max(10).optional(),
 }).refine((data) => data.payment.advancePaid <= data.payment.totalPrice, {
   message: 'Advance paid cannot exceed total price',
   path: ['payment', 'advancePaid'],
@@ -484,9 +478,7 @@ export const updateOrderJsonSchema = {
   params: {
     type: 'object',
     required: ['orderNumber'],
-    properties: {
-      orderNumber: { type: 'string' },
-    },
+    properties: { orderNumber: { type: 'string' } },
   },
   body: {
     type: 'object',
@@ -494,39 +486,42 @@ export const updateOrderJsonSchema = {
     properties: {
       customer: {
         type: 'object',
-        required: ['name', 'phone'],
-        properties: {
-          name: { type: 'string' },
-          phone: { type: 'string' },
-          address: { type: 'string' },
-        },
+        required: ['name'],
+        properties: { name: { type: 'string' }, phone: { type: ['string', 'null'] }, address: { type: 'string' } },
       },
       cake: {
         type: 'object',
-        required: ['category', 'weight', 'flavour'],
+        required: ['category', 'flavour'],
         properties: {
           category: { type: 'string' },
-          weight: { type: 'string' },
           flavour: { type: 'string' },
+          weightInPounds: { type: 'number', exclusiveMinimum: 0 },
+          quantity: { type: 'number', exclusiveMinimum: 0 },
         },
       },
+      occasion: { type: 'string' },
+      customInstructions: { type: 'string' },
       delivery: {
         type: 'object',
-        required: ['date', 'time'],
+        required: ['type', 'date'],
         properties: {
+          type: { type: 'string', enum: DELIVERY_TYPE_VALUES as unknown as string[] },
           date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
           time: { type: 'string', pattern: '^\\d{2}:\\d{2}$' },
+          charge: { type: 'number', minimum: 0 },
         },
       },
       payment: {
         type: 'object',
         required: ['totalPrice', 'advancePaid'],
         properties: {
-          totalPrice: { type: 'integer', minimum: 0 },
-          advancePaid: { type: 'integer', minimum: 0 },
+          totalPrice: { type: 'number', exclusiveMinimum: 0 },
+          advancePaid: { type: 'number', minimum: 0 },
         },
       },
-      referencePhoto: { type: ['string', 'null'], format: 'uri' },
+      referencePhotoUrl: { type: ['string', 'null'], format: 'uri' },
+      internalNotes: { type: 'string' },
+      customFields: { type: 'array', maxItems: 10, items: { type: 'object' } },
     },
   },
   response: {
@@ -541,10 +536,10 @@ export const updateOrderJsonSchema = {
             orderId: { type: 'string' },
             orderNumber: { type: 'string' },
             customerName: { type: 'string' },
-            deliveryDate: { type: 'string', format: 'date-time' },
-            totalPrice: { type: 'integer' },
-            advancePaid: { type: 'integer' },
-            balanceDue: { type: 'integer' },
+            deliveryDate: { type: 'string', format: 'date' },
+            totalPrice: { type: 'number' },
+            advancePaid: { type: 'number' },
+            balanceDue: { type: 'number' },
             paymentStatus: { type: 'string' },
             updatedAt: { type: 'string', format: 'date-time' },
           },
@@ -554,25 +549,17 @@ export const updateOrderJsonSchema = {
     400: {
       description: 'Validation failed',
       type: 'object',
-      properties: {
-        statusCode: { type: 'integer' },
-        error: { type: 'string' },
-        message: { type: 'string' },
-      },
+      properties: { statusCode: { type: 'integer' }, error: { type: 'string' }, message: { type: 'string' } },
     },
     409: {
-      description: 'Conflict (Cannot edit delivered order or phone conflict)',
+      description: 'Conflict (Cannot edit delivered/cancelled order or phone conflict)',
       type: 'object',
-      properties: {
-        success: { type: 'boolean' },
-        message: { type: 'string' },
-        errorCode: { type: 'string' },
-      },
+      properties: { success: { type: 'boolean' }, message: { type: 'string' }, errorCode: { type: 'string' } },
     },
   },
 };
 
-// ── DELETE /api/orders/:orderNumber (Cancel / Archive Order) ─────────────
+// ── DELETE /api/orders/:orderNumber (Cancel Order) ─────────────────
 
 export const CancelOrderParamsSchema = z.object({
   orderNumber: z.string().min(1),
@@ -581,15 +568,13 @@ export const CancelOrderParamsSchema = z.object({
 export type CancelOrderParams = z.infer<typeof CancelOrderParamsSchema>;
 
 export const cancelOrderJsonSchema = {
-  description: 'Cancel and logically archive an order',
+  description: 'Cancel an order (order_status = Cancelled)',
   tags: ['Orders'],
   security: [{ cookieAuth: [] }],
   params: {
     type: 'object',
     required: ['orderNumber'],
-    properties: {
-      orderNumber: { type: 'string' },
-    },
+    properties: { orderNumber: { type: 'string' } },
   },
   response: {
     200: {
@@ -611,11 +596,7 @@ export const cancelOrderJsonSchema = {
     409: {
       description: 'Conflict (Cannot cancel delivered or already cancelled order)',
       type: 'object',
-      properties: {
-        success: { type: 'boolean' },
-        message: { type: 'string' },
-        errorCode: { type: 'string' },
-      },
+      properties: { success: { type: 'boolean' }, message: { type: 'string' }, errorCode: { type: 'string' } },
     },
   },
 };

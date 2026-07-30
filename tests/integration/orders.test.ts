@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { prisma } from '../../src/shared/database/prisma.js';
 import { ordersService } from '../../src/modules/orders/orders.service.js';
-import { customersService } from '../../src/modules/customers/customers.service.js';
 import { v4 as uuidv4 } from 'uuid';
 
 describe('Integration Tests: Orders & Customers Modules', () => {
@@ -12,7 +11,7 @@ describe('Integration Tests: Orders & Customers Modules', () => {
     const baker = await prisma.baker.create({
       data: {
         email: `test-${uuidv4()}@example.com`,
-        phoneNumber: '+919999999999',
+        phoneNumber: '9999999999',
         businessName: 'Integration Test Bakery',
         ownerName: 'Integration Tester',
         status: 'ACTIVE',
@@ -35,23 +34,26 @@ describe('Integration Tests: Orders & Customers Modules', () => {
     const payload = {
       customer: {
         name: 'John Test Integration',
-        phone: '+918888888888',
+        phone: '8888888888',
         address: '123 Baker Street',
       },
       delivery: {
+        type: 'delivery' as const,
         date: '2026-10-31',
         time: '14:30',
       },
       cake: {
         category: 'Cake',
-        weight: '1.5kg',
         flavour: 'Red Velvet',
+        weightInPounds: 3.3,
       },
       payment: {
-        totalPrice: 450000, // 4500 INR in paise
-        advancePaid: 150000, // 1500 INR in paise
+        totalPrice: 4500,
+        advancePaid: 1500,
+        paymentMethod: 'CASH' as const,
+        forceConfirm: false,
       },
-      referencePhoto: null,
+      referencePhotoUrl: null,
     };
 
     // Act: Create order using ordersService
@@ -59,13 +61,13 @@ describe('Integration Tests: Orders & Customers Modules', () => {
 
     expect(result.orderId).toBeDefined();
     expect(result.orderNumber).toBeDefined();
-    expect(result.balanceDue).toBe(300000);
-    expect(result.paymentStatus).toBe('PARTIALLY_PAID');
-    expect(result.status).toBe('PENDING');
+    expect(result.balanceDue).toBe(3000);
+    expect(result.paymentStatus).toBe('Partially Paid');
+    expect(result.status).toBe('Confirmed'); // advancePaid > 0 promotes Pending -> Confirmed
 
     // Assert: Check if customer is upserted
     const customer = await prisma.customer.findFirst({
-      where: { bakerId: testBakerId, phone: '+918888888888' },
+      where: { bakerId: testBakerId, phone: '8888888888' },
     });
     expect(customer).toBeDefined();
     expect(customer?.name).toBe('John Test Integration');
@@ -75,16 +77,16 @@ describe('Integration Tests: Orders & Customers Modules', () => {
       where: { id: result.orderId },
     });
     expect(dbOrder).toBeDefined();
-    expect(dbOrder?.totalPrice).toBe(450000);
-    expect(dbOrder?.advancePaid).toBe(150000);
-    expect(dbOrder?.balanceDue).toBe(300000);
+    expect(Number(dbOrder?.totalPrice)).toBe(4500);
+    expect(Number(dbOrder?.advancePaid)).toBe(1500);
+    expect(Number(dbOrder?.balanceDue)).toBe(3000);
   });
 
   it('should successfully query orders history with filtering and pagination', async () => {
     const query = {
       page: 1,
       limit: 10,
-      status: 'PENDING' as any,
+      status: 'Confirmed' as any,
     };
 
     const history = await ordersService.getOrders(testBakerId, query);
@@ -100,10 +102,10 @@ describe('Integration Tests: Orders & Customers Modules', () => {
     });
     expect(list).toBeDefined();
 
-    const details = await ordersService.getOrderDetails(testBakerId, list!.orderNumber);
+    const details = await ordersService.getOrderDetails(testBakerId, list!.displayId);
     expect(details).toBeDefined();
-    expect(details!.orderId).toBe(list!.orderNumber);
-    expect(details!.customer.phone).toBe('+918888888888');
+    expect(details!.orderId).toBe(list!.displayId);
+    expect(details!.customer.phone).toBe('8888888888');
     expect(details!.cake.flavour).toBe('Red Velvet');
   });
 });

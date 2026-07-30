@@ -22,20 +22,22 @@ describe('Action 15 E2E: Calendar View', () => {
     // Create a delivery order scheduled for a specific date
     await prisma.order.create({
       data: {
-        orderNumber: 'ORD-CAL-001',
+        displayId: 'ORD-CAL-001',
         baker: { connect: { id: 'test-baker-id' } },
-        category: 'Cake',
-        weight: '1kg',
-        flavour: 'Black Forest',
-        deliveryDate: new Date('2026-08-15T15:00:00Z'),
-        totalPrice: 100000,
-        advancePaid: 50000,
-        balanceDue: 50000,
+        cakeCategory: 'Cake',
+        cakeFlavour: 'Black Forest',
+        deliveryType: 'delivery',
+        deliveryDate: new Date('2026-08-15T00:00:00Z'),
+        totalPrice: 1000,
+        advancePaid: 500,
+        balanceDue: 500,
+        orderStatus: 'Confirmed',
+        paymentStatus: 'Partially Paid',
         customer: {
           create: {
             bakerId: 'test-baker-id',
             name: 'Calendar Cust',
-            phone: '+919999999901',
+            phone: '9999999901',
           },
         },
       },

@@ -33,6 +33,20 @@ export async function loadSummaryDashboard(
         createdAt: order.createdAt.toISOString(),
         updatedAt: order.updatedAt.toISOString(),
       })),
+      upcomingOrders: {
+        month: summary.upcomingOrders.month,
+        orders: summary.upcomingOrders.orders.map((order) => ({
+          id: order.id,
+          orderNumber: order.orderNumber,
+          customerName: order.customerName,
+          cakeCategory: order.cakeCategory,
+          deliveryDate: order.deliveryDate.toISOString().slice(0, 10),
+          deliveryTime: order.deliveryTime,
+          status: order.status,
+          totalPrice: order.totalPrice,
+          balanceDue: order.balanceDue,
+        })),
+      },
     },
   });
 }

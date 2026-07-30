@@ -16,6 +16,7 @@ import { dashboardRoutes } from './modules/dashboard/dashboard.routes.js';
 import { ordersRoutes } from './modules/orders/orders.routes.js';
 import { customersRoutes } from './modules/customers/customers.routes.js';
 import { investmentsRoutes } from './modules/investments/investments.routes.js';
+import { inventoryRoutes } from './modules/inventory/inventory.routes.js';
 import { billingRoutes } from './modules/billing/billing.routes.js';
 import { webhooksRoutes } from './modules/webhooks/webhooks.routes.js';
 import { bakerRoutes } from './modules/baker/baker.routes.js';
@@ -124,6 +125,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(ordersRoutes, { prefix: '/api/orders' });
   await app.register(customersRoutes, { prefix: '/api/customers' });
   await app.register(investmentsRoutes, { prefix: '/api/investments' });
+  await app.register(inventoryRoutes, { prefix: '/api/inventory-items' });
   await app.register(billingRoutes, { prefix: '/api/billing' });
   await app.register(webhooksRoutes, { prefix: '/api/webhooks' });
   await app.register(bakerRoutes, { prefix: '/api/baker' });

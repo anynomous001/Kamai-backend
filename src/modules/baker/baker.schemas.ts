@@ -23,6 +23,20 @@ export const UpdateUpiSettingsBodySchema = z.object({
 
 export type UpdateUpiSettingsBody = z.infer<typeof UpdateUpiSettingsBodySchema>;
 
+// ── PATCH /api/baker/profile ─────────────────────────────────
+// logoPath is intentionally NOT here — it's written by the existing
+// POST /api/uploads/confirm (category: BUSINESS_LOGO) flow, which already
+// persists it via a signed-upload + confirm round trip.
+export const UpdateBakerProfileBodySchema = z
+  .object({
+    ownerName: z.string().min(1).max(120).optional(),
+    phone: z.string().regex(/^[6-9]\d{9}$/, 'Must be a valid 10-digit Indian mobile number').optional(),
+    defaultAdvancePercentage: z.number().min(0).max(100).optional(),
+  })
+  .refine((data) => Object.keys(data).length > 0, { message: 'At least one field must be provided' });
+
+export type UpdateBakerProfileBody = z.infer<typeof UpdateBakerProfileBodySchema>;
+
 export const GetBakerProfileResponseSchema = z.object({
   success: z.boolean(),
   data: z.object({
@@ -32,6 +46,7 @@ export const GetBakerProfileResponseSchema = z.object({
       phone: z.string(),
       email: z.string().nullable(),
       logoUrl: z.string().nullable(),
+      accountVerified: z.boolean(),
     }),
     verification: z.object({
       fssaiNumber: z.string().nullable(),
@@ -43,6 +58,8 @@ export const GetBakerProfileResponseSchema = z.object({
       merchantName: z.string().nullable(),
       defaultCollectionMethod: z.string(),
       dynamicQrEnabled: z.boolean(),
+      whatsappReceiptEnabled: z.boolean(),
+      defaultAdvancePercentage: z.number().nullable(),
     }),
     subscription: z.object({
       plan: z.string().nullable(),
@@ -108,6 +125,47 @@ export const UpdateUpiSettingsSchema = {
   },
 };
 
+export const UpdateBakerProfileSchema = {
+  description: 'Update baker owner name, phone, and/or default advance percentage',
+  tags: ['Baker Profile'],
+  security: [{ bearerAuth: [] }],
+  body: {
+    type: 'object',
+    properties: {
+      ownerName: { type: 'string', example: 'Priya Sharma' },
+      phone: { type: 'string', example: '9876543210' },
+      defaultAdvancePercentage: { type: 'number', minimum: 0, maximum: 100, example: 50 },
+    },
+  },
+  response: {
+    200: {
+      description: 'Profile updated successfully',
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        data: {
+          type: 'object',
+          properties: {
+            ownerName: { type: 'string', nullable: true },
+            phone: { type: 'string', nullable: true },
+            defaultAdvancePercentage: { type: 'number', nullable: true },
+            updatedAt: { type: 'string', format: 'date-time' },
+          },
+        },
+      },
+    },
+    422: {
+      description: 'Validation Error',
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        errorCode: { type: 'string' },
+        message: { type: 'string' },
+      },
+    },
+  },
+};
+
 export const GetBakerProfileSchema = {
   description: 'Get baker business profile and settings',
   tags: ['Baker Profile'],
@@ -129,6 +187,7 @@ export const GetBakerProfileSchema = {
                 phone: { type: 'string' },
                 email: { type: 'string', nullable: true },
                 logoUrl: { type: 'string', nullable: true },
+                accountVerified: { type: 'boolean' },
               },
             },
             verification: {
@@ -146,6 +205,8 @@ export const GetBakerProfileSchema = {
                 merchantName: { type: 'string', nullable: true },
                 defaultCollectionMethod: { type: 'string' },
                 dynamicQrEnabled: { type: 'boolean' },
+                whatsappReceiptEnabled: { type: 'boolean' },
+                defaultAdvancePercentage: { type: 'number', nullable: true },
               },
             },
             subscription: {

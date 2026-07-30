@@ -21,20 +21,20 @@ describe('Action 10 E2E: Cancel / Archive Order', () => {
 
     await prisma.order.create({
       data: {
-        orderNumber: 'ORD-DEL-001',
+        displayId: 'ORD-DEL-001',
         baker: { connect: { id: 'test-baker-id' } },
-        category: 'Cake',
-        weight: '1kg',
-        flavour: 'Mango',
+        cakeCategory: 'Cake',
+        cakeFlavour: 'Mango',
+        deliveryType: 'pickup',
         deliveryDate: new Date(),
-        totalPrice: 100000,
+        totalPrice: 1000,
         advancePaid: 0,
-        balanceDue: 100000,
+        balanceDue: 1000,
         customer: {
           create: {
             bakerId: 'test-baker-id',
             name: 'Cancel Cust',
-            phone: '+919999999998',
+            phone: '9999999998',
           },
         },
       },
@@ -47,7 +47,7 @@ describe('Action 10 E2E: Cancel / Archive Order', () => {
     });
   });
 
-  it('should successfully cancel/archive the order and set terminal status', async () => {
+  it('should successfully cancel the order and set terminal status', async () => {
     const response = await app.inject({
       method: 'DELETE',
       url: '/api/orders/ORD-DEL-001',
@@ -56,12 +56,12 @@ describe('Action 10 E2E: Cancel / Archive Order', () => {
     expect(response.statusCode).toBe(200);
     const body = JSON.parse(response.body);
     expect(body.success).toBe(true);
-    expect(body.data.status).toBe('CANCELLED');
+    expect(body.data.status).toBe('Cancelled');
 
-    // Confirm it is soft-deleted
+    // Cancelled is a real order_status value now, not a separate soft-delete flag
     const order = await prisma.order.findUnique({
-      where: { orderNumber: 'ORD-DEL-001' },
+      where: { bakerId_displayId: { bakerId: 'test-baker-id', displayId: 'ORD-DEL-001' } },
     });
-    expect(order?.deletedAt).not.toBeNull();
+    expect(order?.orderStatus).toBe('Cancelled');
   });
 });

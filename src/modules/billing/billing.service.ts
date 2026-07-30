@@ -12,8 +12,7 @@ export async function getBillingStatus(bakerId: string) {
     select: {
       subscriptionStatus: true,
       subscriptionPlan: true,
-      trialStartDate: true,
-      trialEndDate: true,
+      trialEndsAt: true,
       nextBillingDate: true,
       razorpaySubscriptionId: true,
     },
@@ -24,9 +23,9 @@ export async function getBillingStatus(bakerId: string) {
   }
 
   let trialDaysRemaining = 0;
-  if (baker.trialEndDate) {
+  if (baker.trialEndsAt) {
     const now = new Date();
-    const diffTime = baker.trialEndDate.getTime() - now.getTime();
+    const diffTime = baker.trialEndsAt.getTime() - now.getTime();
     trialDaysRemaining = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
   }
 
@@ -34,7 +33,7 @@ export async function getBillingStatus(bakerId: string) {
     plan: baker.subscriptionPlan ?? null,
     subscriptionStatus: baker.subscriptionStatus,
     trialDaysRemaining,
-    trialEndDate: baker.trialEndDate ? baker.trialEndDate.toISOString().split('T')[0] : null,
+    trialEndDate: baker.trialEndsAt ? baker.trialEndsAt.toISOString().split('T')[0] : null,
     nextBillingDate: baker.nextBillingDate ? baker.nextBillingDate.toISOString().split('T')[0] : null,
     autoRenew: baker.razorpaySubscriptionId != null,
   };

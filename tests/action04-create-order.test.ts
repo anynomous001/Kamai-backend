@@ -30,23 +30,24 @@ describe('Action 4 E2E: Create New Order', () => {
     const payload = {
       customer: {
         name: 'Jane Doe',
-        phone: '+919999999992',
+        phone: '9999999992',
         address: '456 Sweet St',
       },
       delivery: {
+        type: 'delivery',
         date: '2026-12-25',
         time: '18:00',
       },
       cake: {
         category: 'Cupcake',
-        weight: '0.5kg',
         flavour: 'Strawberry',
+        weightInPounds: 1.1,
       },
       payment: {
-        totalPrice: 200000,
-        advancePaid: 50000,
+        totalPrice: 2000,
+        advancePaid: 500,
       },
-      referencePhoto: null,
+      referencePhotoUrl: null,
     };
 
     const response = await app.inject({
@@ -59,6 +60,6 @@ describe('Action 4 E2E: Create New Order', () => {
     const body = JSON.parse(response.body);
     expect(body.success).toBe(true);
     expect(body.data.orderNumber).toBeDefined();
-    expect(body.data.balanceDue).toBe(150000);
+    expect(body.data.balanceDue).toBe(1500);
   });
 });

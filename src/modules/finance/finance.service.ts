@@ -1,9 +1,11 @@
 import type { Prisma } from '@prisma/client';
-import type { PaymentMode, TransactionType } from '@prisma/client';
+
+export type PaymentEventType = 'advance_received' | 'balance_received' | 'refund';
+export type PaymentMode = 'CASH' | 'UPI' | 'CARD' | 'BANK_TRANSFER';
 
 export class FinanceService {
   /**
-   * Records a financial transaction into the PaymentLedger.
+   * Records a payment event into the payment_events ledger.
    * This method MUST be called within a Prisma transaction (`tx`) to ensure atomicity
    * with the corresponding order/balance update.
    */
@@ -12,20 +14,18 @@ export class FinanceService {
     data: {
       bakerId: string;
       orderId?: string;
-      orderNumber?: string;
       amount: number;
-      type: TransactionType;
+      eventType: PaymentEventType;
       paymentMode: PaymentMode;
       transactionReference?: string;
     },
   ) {
-    return tx.paymentLedger.create({
+    return tx.paymentEvent.create({
       data: {
         bakerId: data.bakerId,
         orderId: data.orderId,
-        orderNumber: data.orderNumber,
         amount: data.amount,
-        type: data.type,
+        eventType: data.eventType,
         paymentMode: data.paymentMode,
         transactionReference: data.transactionReference,
       },

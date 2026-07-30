@@ -5,90 +5,57 @@ import { ConflictError } from '../../src/shared/errors/index.js';
 describe('Unit Tests: Pricing & Status validation', () => {
   describe('Status machine transition validation rules', () => {
     it('should validate allowed status transitions', () => {
-      // PENDING transitions
-      expect(() => statusValidationService.assertValidTransition('PENDING', 'CONFIRMED')).not.toThrow();
-      expect(() => statusValidationService.assertValidTransition('PENDING', 'CANCELLED')).not.toThrow();
+      expect(() => statusValidationService.assertValidTransition('Pending', 'Confirmed')).not.toThrow();
+      expect(() => statusValidationService.assertValidTransition('Pending', 'Cancelled')).not.toThrow();
 
-      // CONFIRMED transitions
-      expect(() => statusValidationService.assertValidTransition('CONFIRMED', 'IN_PROGRESS')).not.toThrow();
-      expect(() => statusValidationService.assertValidTransition('CONFIRMED', 'CANCELLED')).not.toThrow();
+      expect(() => statusValidationService.assertValidTransition('Confirmed', 'In Progress')).not.toThrow();
+      expect(() => statusValidationService.assertValidTransition('Confirmed', 'Cancelled')).not.toThrow();
 
-      // IN_PROGRESS transitions
-      expect(() => statusValidationService.assertValidTransition('IN_PROGRESS', 'READY')).not.toThrow();
-      expect(() => statusValidationService.assertValidTransition('IN_PROGRESS', 'CANCELLED')).not.toThrow();
+      expect(() => statusValidationService.assertValidTransition('In Progress', 'Ready')).not.toThrow();
+      expect(() => statusValidationService.assertValidTransition('In Progress', 'Cancelled')).not.toThrow();
 
-      // READY transitions
-      expect(() => statusValidationService.assertValidTransition('READY', 'DELIVERED')).not.toThrow();
-      expect(() => statusValidationService.assertValidTransition('READY', 'CANCELLED')).not.toThrow();
+      expect(() => statusValidationService.assertValidTransition('Ready', 'Delivered')).not.toThrow();
+      expect(() => statusValidationService.assertValidTransition('Ready', 'Cancelled')).not.toThrow();
     });
 
     it('should prevent transitions into immutable status states', () => {
-      // DELIVERED is terminal
-      expect(() => statusValidationService.assertValidTransition('DELIVERED', 'PENDING')).toThrow(ConflictError);
-      
-      // CANCELLED is terminal
-      expect(() => statusValidationService.assertValidTransition('CANCELLED', 'PENDING')).toThrow(ConflictError);
+      expect(() => statusValidationService.assertValidTransition('Delivered', 'Pending')).toThrow(ConflictError);
+      expect(() => statusValidationService.assertValidTransition('Cancelled', 'Pending')).toThrow(ConflictError);
     });
 
     it('should throw ConflictError if transitioning to the exact same status', () => {
-      expect(() => statusValidationService.assertValidTransition('PENDING', 'PENDING')).toThrow(ConflictError);
-      expect(() => statusValidationService.assertValidTransition('CONFIRMED', 'CONFIRMED')).toThrow(ConflictError);
+      expect(() => statusValidationService.assertValidTransition('Pending', 'Pending')).toThrow(ConflictError);
+      expect(() => statusValidationService.assertValidTransition('Confirmed', 'Confirmed')).toThrow(ConflictError);
     });
 
     it('should throw ConflictError for illegal non-linear status skips', () => {
-      expect(() => statusValidationService.assertValidTransition('PENDING', 'READY')).toThrow(ConflictError);
-      expect(() => statusValidationService.assertValidTransition('CONFIRMED', 'DELIVERED')).toThrow(ConflictError);
+      expect(() => statusValidationService.assertValidTransition('Pending', 'Ready')).toThrow(ConflictError);
+      expect(() => statusValidationService.assertValidTransition('Confirmed', 'Delivered')).toThrow(ConflictError);
     });
   });
 
-  describe('Pricing Calculations and Balance Due', () => {
-    it('should correctly calculate balance due and unpaid status', () => {
-      const total = 50000; // 500 INR in paise
-      const advance = 0;
-      const balance = total - advance;
-      
-      expect(balance).toBe(50000);
-      
-      // Initial status calculation logic replicated from OrdersService
-      let initialPaymentStatus = 'UNPAID';
-      if (advance > 0 && balance > 0) {
-        initialPaymentStatus = 'PARTIALLY_PAID';
-      } else if (balance === 0) {
-        initialPaymentStatus = 'PAID';
-      }
-      expect(initialPaymentStatus).toBe('UNPAID');
+  describe('Payment state derivation (matches OrdersService.derivePaymentState)', () => {
+    function derive(totalPrice: number, advancePaid: number, forceConfirm = false) {
+      const paymentStatus =
+        advancePaid === 0 ? 'Unpaid' : advancePaid === totalPrice ? 'Paid' : 'Partially Paid';
+      const orderStatus = advancePaid > 0 || forceConfirm ? 'Confirmed' : 'Pending';
+      return { orderStatus, paymentStatus };
+    }
+
+    it('advancePaid = 0, not force-confirmed -> Pending / Unpaid', () => {
+      expect(derive(500, 0)).toEqual({ orderStatus: 'Pending', paymentStatus: 'Unpaid' });
     });
 
-    it('should correctly calculate balance due and partially paid status', () => {
-      const total = 50000;
-      const advance = 15000; // 150 INR in paise
-      const balance = total - advance;
-      
-      expect(balance).toBe(35000);
-      
-      let initialPaymentStatus = 'UNPAID';
-      if (advance > 0 && balance > 0) {
-        initialPaymentStatus = 'PARTIALLY_PAID';
-      } else if (balance === 0) {
-        initialPaymentStatus = 'PAID';
-      }
-      expect(initialPaymentStatus).toBe('PARTIALLY_PAID');
+    it('advancePaid = 0, force-confirmed -> Confirmed / Unpaid', () => {
+      expect(derive(500, 0, true)).toEqual({ orderStatus: 'Confirmed', paymentStatus: 'Unpaid' });
     });
 
-    it('should correctly calculate balance due and fully paid status', () => {
-      const total = 50000;
-      const advance = 50000;
-      const balance = total - advance;
-      
-      expect(balance).toBe(0);
-      
-      let initialPaymentStatus = 'UNPAID';
-      if (advance > 0 && balance > 0) {
-        initialPaymentStatus = 'PARTIALLY_PAID';
-      } else if (balance === 0) {
-        initialPaymentStatus = 'PAID';
-      }
-      expect(initialPaymentStatus).toBe('PAID');
+    it('advancePaid > 0 and < totalPrice -> Confirmed / Partially Paid', () => {
+      expect(derive(500, 150)).toEqual({ orderStatus: 'Confirmed', paymentStatus: 'Partially Paid' });
+    });
+
+    it('advancePaid = totalPrice -> Confirmed / Paid', () => {
+      expect(derive(500, 500)).toEqual({ orderStatus: 'Confirmed', paymentStatus: 'Paid' });
     });
   });
 });

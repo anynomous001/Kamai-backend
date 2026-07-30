@@ -7,10 +7,10 @@ import type { Baker } from '@prisma/client';
 
 describe('Unit Tests: Helpers and Mappers', () => {
   describe('MessageFormatter Utility Class', () => {
-    it('should format currency values from paise to Indian Rupees correctly', () => {
-      expect(MessageFormatter.formatPrice(50000)).toBe('₹500');
+    it('should format currency values in Indian Rupees correctly', () => {
+      expect(MessageFormatter.formatPrice(500)).toBe('₹500');
       expect(MessageFormatter.formatPrice(0)).toBe('₹0');
-      expect(MessageFormatter.formatPrice(12550)).toBe('₹125.5');
+      expect(MessageFormatter.formatPrice(125.5)).toBe('₹125.5');
     });
 
     it('should format dates to Indian locale format', () => {
@@ -26,9 +26,10 @@ describe('Unit Tests: Helpers and Mappers', () => {
         orderNumber: 'ORD-001',
         items: [{ name: 'Chocolate Truffle Cake 1kg', quantity: 1 }],
         deliveryDate: new Date('2026-07-26T12:00:00Z'),
-        totalPrice: 50000,
-        advancePaid: 15000,
-        balanceDue: 35000,
+        deliveryType: 'pickup' as const,
+        totalPrice: 500,
+        advancePaid: 150,
+        balanceDue: 350,
         customerName: 'Aria Dev',
         bakerBusinessName: 'Aria Cakes',
         upiId: 'baker@upi',
@@ -53,9 +54,10 @@ describe('Unit Tests: Helpers and Mappers', () => {
       orderNumber: 'ORD-001',
       items: [{ name: 'Vanilla cake 0.5kg', quantity: 2 }],
       deliveryDate: new Date('2026-07-26T12:00:00Z'),
-      totalPrice: 40000,
-      advancePaid: 20000,
-      balanceDue: 20000,
+      deliveryType: 'pickup' as const,
+      totalPrice: 400,
+      advancePaid: 200,
+      balanceDue: 200,
       customerName: 'Rahul',
       bakerBusinessName: 'Rahul Bakery',
       upiId: 'rahul@okaxis',
@@ -81,6 +83,14 @@ describe('Unit Tests: Helpers and Mappers', () => {
       expect(msg).toContain('Kindly complete the remaining payment before pickup');
     });
 
+    it('should format PAYMENT_REMINDER message with delivery-aware wording', () => {
+      const msg = WhatsAppTemplateEngine.generateMessage(
+        WhatsAppNotificationTemplate.PAYMENT_REMINDER,
+        { ...baseOrderData, deliveryType: 'delivery' as const }
+      );
+      expect(msg).toContain('Kindly complete the remaining payment before delivery');
+    });
+
     it('should format READY_FOR_PICKUP message correctly', () => {
       const msg = WhatsAppTemplateEngine.generateMessage(
         WhatsAppNotificationTemplate.READY_FOR_PICKUP,
@@ -88,6 +98,15 @@ describe('Unit Tests: Helpers and Mappers', () => {
       );
       expect(msg).toContain('Your order #ORD-001 is ready for pickup!');
       expect(msg).toContain('Please clear your balance of ₹200');
+    });
+
+    it('should format READY_FOR_PICKUP message with delivery-aware wording', () => {
+      const msg = WhatsAppTemplateEngine.generateMessage(
+        WhatsAppNotificationTemplate.READY_FOR_PICKUP,
+        { ...baseOrderData, deliveryType: 'delivery' as const }
+      );
+      expect(msg).toContain('ready and out for delivery');
+      expect(msg).toContain('Please clear your balance of ₹200 at delivery');
     });
 
     it('should format RECEIPT message correctly', () => {
@@ -121,14 +140,15 @@ describe('Unit Tests: Helpers and Mappers', () => {
         phoneNumber: '+919999999999',
         email: 'alice@delight.com',
         fssaiNumber: '12345678901234',
-        isVerified: true,
-        upiId: 'alice@upi',
+        fssaiVerified: true,
+        isVerified: false,
+        upiVpa: 'alice@upi',
         merchantName: 'Alice Merchant',
         defaultCollectionMethod: 'UPI',
-        dynamicQrEnabled: true,
+        qrCodeEnabled: true,
         subscriptionPlan: 'EARLY_ADOPTER',
         subscriptionStatus: 'ACTIVE',
-        trialEndDate: futureDate,
+        trialEndsAt: futureDate,
         nextBillingDate: futureDate,
       } as unknown as Baker;
 
@@ -141,6 +161,7 @@ describe('Unit Tests: Helpers and Mappers', () => {
       expect(profile.business.businessName).toBe('Delight Cakes');
       expect(profile.business.phone).toBe('+919999999999');
       expect(profile.business.logoUrl).toBe('https://logo.url');
+      expect(profile.business.accountVerified).toBe(false);
       expect(profile.verification.fssaiNumber).toBe('12345678901234');
       expect(profile.verification.fssaiVerified).toBe(true);
       expect(profile.payment.upiId).toBe('alice@upi');

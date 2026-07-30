@@ -14,63 +14,21 @@ datasource db {
 // ============================================================
 // ENUMS
 // ============================================================
-
-enum BakerStatus {
-  PENDING_ONBOARDING
-  ACTIVE
-  SUSPENDED
-}
+//
+// Baker-ops tables (bakers, customers, orders, investments,
+// payment_events, inventory_items) intentionally do NOT use native
+// Postgres enums for status/category fields — those are `String` here,
+// backed by a CHECK constraint added in raw SQL in the migration.
+// This lets vocabulary evolve without a schema migration for every
+// new value. See DATABASE_CHANGELOG.md v1.0.0 for the full rationale.
+//
+// WebhookProcessingStatus is unrelated to the baker-ops redesign
+// (WebhookEvent/BillingHistory were left untouched) and stays a
+// native enum.
 
 enum WebhookProcessingStatus {
   SUCCESS
   FAILED
-}
-
-enum CollectionMethod {
-  UPI
-  QR
-}
-
-
-
-enum SubscriptionStatus {
-  TRIAL
-  PENDING
-  ACTIVE
-  PAUSED
-  CANCELLED
-  EXPIRED
-}
-
-enum SubscriptionPlan {
-  EARLY_ADOPTER
-}
-
-enum OrderStatus {
-  PENDING
-  CONFIRMED
-  IN_PROGRESS
-  READY
-  DELIVERED
-  CANCELLED
-}
-
-enum PaymentStatus {
-  UNPAID
-  PARTIALLY_PAID
-  PAID
-}
-
-enum TransactionType {
-  CREDIT
-  DEBIT
-}
-
-enum PaymentMode {
-  CASH
-  UPI
-  CARD
-  BANK_TRANSFER
 }
 
 // ============================================================
@@ -78,215 +36,273 @@ enum PaymentMode {
 // ============================================================
 
 // ── Baker ────────────────────────────────────────────────────
-// Core identity for every Kamai baker account.
-// Created on first email OTP verification (see ADR-009).
-// Profile fields (businessName, etc.) are populated during
-// the onboarding flow after initial login.
+// Tenant root. Every other baker-ops table has a bakerId FK into this.
+// Created on first email OTP verification (see ADR-009) by
+// auth/tenant.service.ts — that insert's DATA SHAPE was updated to
+// match this table, but no auth logic changed.
 model Baker {
-  id                 String             @id @default(uuid())
+  id        String  @id @default(uuid()) @map("id")
+  displayId String  @unique @default(dbgenerated()) @map("display_id") // BAKER-001, sequence+trigger generated
 
   // Contact & Login info
-  phoneNumber        String?
-  email              String?            @unique
+  phoneNumber String? @map("phone")
+  email       String? @unique @map("email")
 
-  subscriptionStatus SubscriptionStatus @default(TRIAL)
+  businessName String? @map("business_name")
+  ownerName    String? @map("owner_name")
+  logoPath     String? @map("logo_path") // storage path; signed read URL generated on request, never persisted as a permanent URL (private bucket)
 
-  // Profile fields — nullable until onboarding is completed
-  businessName       String?
-  ownerName          String?
-  logoPath           String?
-  fssaiNumber        String?
-  fssaiDocumentPath  String?
-  address            String?
-  gstNumber          String?
-  isVerified         Boolean             @default(false)
-  status             BakerStatus         @default(PENDING_ONBOARDING)
+  defaultAdvancePercentage Decimal? @map("default_advance_percentage") @db.Decimal(5, 2) // CHECK 0-100 in migration
 
-  // Payment Settings
-  upiId                    String?
-  merchantName             String?
-  preferredApps            String[]            @default([])
-  defaultCollectionMethod  CollectionMethod    @default(UPI)
-  dynamicQrEnabled         Boolean             @default(true)
+  whatsappReceiptEnabled Boolean @default(true) @map("whatsapp_receipt_enabled")
 
-  // Billing & Subscription
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
+  fssaiNumber       String?  @map("fssai_number") @db.VarChar(14)
+  fssaiVerified     Boolean  @default(false) @map("fssai_verified") // distinct from isVerified below — no verification workflow wired to this yet
+  fssaiDocumentPath String?  @map("fssai_document_path") // Action 20 upload; not in original spec, preserved so the upload feature keeps a home
 
-  trialStartDate     DateTime?
-  trialEndDate       DateTime?
-  razorpaySubscriptionId String? @unique
-  razorpayPlanId     String?
-  nextBillingDate    DateTime?
-  subscriptionPlan   SubscriptionPlan?
+  gstNumber String? @map("gst_number")
 
-  refreshTokens      RefreshToken[]
-  orders             Order[]
-  customers          Customer[]
-  paymentLedgers     PaymentLedger[]
-  investments        Investment[]
-  billingHistory     BillingHistory[]
+  // Payment / collection settings
+  upiVpa                  String?  @map("upi_vpa")
+  merchantName             String?  @map("merchant_name") // display name shown on the UPI/QR page; defaults to businessName if unset — preserved, not in original spec
+  defaultCollectionMethod  String   @default("UPI") @map("default_collection_method") // CHECK: UPI | QR — preserved, not in original spec
+  preferredApps            Json     @default("[]") @map("preferred_apps")
+  qrCodeEnabled            Boolean  @default(true) @map("qr_code_enabled")
 
-  @@index([email])
-  @@index([phoneNumber])
-  @@index([subscriptionStatus])
-  @@index([trialEndDate])
-  @@index([upiId])
+  // Subscription / billing
+  // CHECK: TRIAL | PENDING | ACTIVE | PAUSED | CANCELLED | EXPIRED
+  // Kept as the full 6-state vocab (not the 4-state draft) because
+  // billing.service.ts's Razorpay webhook state map depends on all 6.
+  subscriptionStatus     String    @default("TRIAL") @map("subscription_status")
+  subscriptionPlan       String?   @map("subscription_plan") // CHECK: EARLY_ADOPTER — preserved, distinct from isEarlyAdopter
+  isEarlyAdopter         Boolean   @default(true) @map("is_early_adopter")
+  trialEndsAt            DateTime? @default(dbgenerated("(now() + interval '90 days')")) @map("trial_ends_at")
+  subscriptionEndsAt     DateTime? @map("subscription_ends_at")
+  nextBillingDate        DateTime? @map("next_billing_date") // preserved; currently never written by any code path (Razorpay doesn't push it), kept for the display field to keep working
+  razorpayCustomerId     String?   @map("razorpay_customer_id")
+  razorpaySubscriptionId String?  @unique @map("razorpay_subscription_id")
+  razorpayPlanId         String?   @map("razorpay_plan_id")
+
+  // Account lifecycle (distinct from subscription/billing state)
+  // CHECK: PENDING_ONBOARDING | ACTIVE | SUSPENDED
+  // Read by auth.service.ts to block login for suspended accounts —
+  // values kept byte-for-byte identical, auth logic untouched.
+  status String @default("PENDING_ONBOARDING") @map("status")
+
+  // Generic tenant verification flag (NOT fssai-specific — previously
+  // mismapped to the API's "fssaiVerified" field; now split cleanly).
+  isVerified Boolean @default(false) @map("is_verified")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  refreshTokens  RefreshToken[]
+  orders         Order[]
+  customers      Customer[]
+  paymentEvents  PaymentEvent[]
+  investments    Investment[]
+  inventoryItems InventoryItem[]
+  billingHistory BillingHistory[]
+
+  @@map("bakers")
 }
 
-// ── RefreshToken ──────────────────────────────────────────────
-// Stores the SHA-256 hash of each issued refresh token.
-// Raw token is never persisted.
-// sessionId = RefreshToken.id (referenced inside JWT payload).
+// ── RefreshToken ── (auth — untouched) ──────────────────────
 model RefreshToken {
   id        String    @id @default(uuid())
-
-  // SHA-256 hash of the raw refresh token JWT
   tokenHash String    @unique
-
   bakerId   String
   baker     Baker     @relation(fields: [bakerId], references: [id], onDelete: Cascade)
-
   expiresAt DateTime
   createdAt DateTime  @default(now())
-
-  // Non-null = revoked (e.g. logout, rotation)
   revokedAt DateTime?
 
   @@index([bakerId])
 }
 
-// ── Customer ────────────────────────────────────────────────────
+// ── Customer ─────────────────────────────────────────────────
 model Customer {
-  id        String   @id @default(uuid())
-  
-  bakerId   String
-  baker     Baker    @relation(fields: [bakerId], references: [id], onDelete: Cascade)
-  
-  name      String
-  phone     String
-  address   String?
-  notes     String?
-  preferredDeliveryTime String?
-  
-  totalOrders   Int       @default(0)
-  lifetimeValue Int       @default(0)
-  lastOrderDate DateTime?
-  
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  
-  orders    Order[]
+  id String @id @default(uuid()) @map("id")
+  // Per-baker sequential code, not platform-wide — see Order.displayId
+  // for the identical rationale. Unique per-tenant only; see
+  // @@unique([bakerId, displayId]) below.
+  displayId String @default(dbgenerated()) @map("display_id")
+
+  bakerId String @map("baker_id")
+  baker   Baker  @relation(fields: [bakerId], references: [id], onDelete: Cascade)
+
+  name    String  @map("name")
+  phone   String? @map("phone") // nullable — ~20-30% of real intake has no phone
+  address String? @map("address")
+  notes   String? @map("notes")
+
+  preferredDeliveryTime String? @map("preferred_delivery_time") // preserved, not in original spec
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  orders Order[]
+
+  // lifetimeValue / totalOrders / lastOrderDate are intentionally NOT
+  // columns here — always computed from orders at query time.
 
   @@unique([bakerId, phone])
+  @@unique([bakerId, displayId])
   @@index([bakerId])
-  @@index([phone])
   @@index([bakerId, name])
-  @@index([bakerId, phone])
-  @@index([lastOrderDate])
+  @@map("customers")
 }
 
-// ── Order ─────────────────────────────────────────────────────
+// ── Order ────────────────────────────────────────────────────
 model Order {
-  id             String      @id @default(uuid())
-  orderNumber    String      @unique // e.g. ORD-20260726-00001
-  
-  bakerId        String
-  baker          Baker       @relation(fields: [bakerId], references: [id], onDelete: Cascade)
-  
-  customerId     String
-  customer       Customer    @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  
-  category       String
-  weight         String
-  flavour        String
-  referencePhoto String?
-  
-  deliveryDate   DateTime
-  status         OrderStatus @default(PENDING)
-  
-  // Stored as integer representing smallest currency unit (e.g. paise)
-  totalPrice     Int
-  advancePaid    Int
-  balanceDue     Int
-  
-  paymentStatus  PaymentStatus @default(UNPAID)
-  
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
-  deletedAt      DateTime?
-  
-  paymentLedgers PaymentLedger[]
-  
-  @@index([bakerId])
-  @@index([customerId])
-  @@index([deliveryDate])
-  @@index([status])
-  @@index([orderNumber])
-  
-  // Compound indexes for Action 5 Order History optimizations
-  @@index([bakerId, status])
+  id        String @id @default(uuid()) @map("id")
+  // Per-baker sequential code (ORD-000001 is baker A's first order AND
+  // baker B's first order) — generated by a per-tenant counter, not a
+  // platform-wide sequence, so it only reflects that baker's own volume.
+  // Unique per-tenant only; see @@unique([bakerId, displayId]) below.
+  displayId String @default(dbgenerated()) @map("display_id")
+
+  bakerId String @map("baker_id")
+  baker   Baker  @relation(fields: [bakerId], references: [id], onDelete: Cascade)
+
+  customerId String   @map("customer_id")
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  cakeCategory  String @map("cake_category")
+  cakeFlavour   String @map("cake_flavour")
+
+  weightInPounds Decimal? @map("weight_in_pounds") @db.Decimal(10, 3)
+  quantity       Decimal? @map("quantity") @db.Decimal(10, 3)
+
+  occasion           String? @map("occasion")
+  customInstructions String? @map("custom_instructions")
+
+  deliveryType   String    @map("delivery_type") // CHECK: pickup | delivery
+  deliveryDate   DateTime  @map("delivery_date") @db.Date
+  deliveryTime   DateTime? @map("delivery_time") @db.Time
+  deliveryCharge Decimal?  @map("delivery_charge") @db.Decimal(10, 2) // CHECK >= 0; coerced to 0 for pickup at the app layer
+
+  totalPrice  Decimal @map("total_price") @db.Decimal(10, 2) // CHECK > 0
+  advancePaid Decimal @default(0) @map("advance_paid") @db.Decimal(10, 2) // CHECK >= 0 AND <= total_price
+  balanceDue  Decimal @map("balance_due") @db.Decimal(10, 2) // server-computed: total_price - advance_paid, never trust client
+
+  // CHECK: Pending | Confirmed | In Progress | Ready | Delivered | Cancelled
+  orderStatus String @default("Pending") @map("order_status")
+  // CHECK: Unpaid | Partially Paid | Paid
+  paymentStatus String @default("Unpaid") @map("payment_status")
+
+  referencePhotoUrl String? @map("reference_photo_url")
+  internalNotes     String? @map("internal_notes")
+
+  // Array of {label, value}; max-10 enforced at the app/service layer, not the DB.
+  customFields Json? @map("custom_fields")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  paymentEvents PaymentEvent[]
+
+  @@index([bakerId, orderStatus])
   @@index([bakerId, deliveryDate])
-  @@index([bakerId, createdAt])
-  
-  // CRM Aggregation optimizations
-  @@index([customerId, status])
-  @@index([customerId, deliveryDate])
-  @@index([customerId, balanceDue])
-  @@index([customerId, createdAt])
-  @@index([bakerId, orderNumber])
+  @@index([bakerId, paymentStatus])
+  @@index([bakerId, createdAt(sort: Desc)])
+  @@index([bakerId, balanceDue(sort: Desc)])
+  @@unique([bakerId, displayId])
+  @@map("orders")
 }
 
-// ── PaymentLedger ──────────────────────────────────────────────
-model PaymentLedger {
-  id                   String          @id @default(uuid())
-  
-  bakerId              String
-  baker                Baker           @relation(fields: [bakerId], references: [id], onDelete: Cascade)
-  
-  orderId              String?
-  order                Order?          @relation(fields: [orderId], references: [id], onDelete: SetNull)
-  
-  orderNumber          String?
-  
-  amount               Int
-  type                 TransactionType
-  paymentMode          PaymentMode
-  transactionReference String?
-  
-  transactionDate      DateTime        @default(now())
-  createdAt            DateTime        @default(now())
-  
-  @@index([bakerId, transactionDate])
-  @@index([orderId])
+// ── PaymentEvent ── (replaces PaymentLedger) ────────────────
+model PaymentEvent {
+  id        String @id @default(uuid()) @map("id")
+  displayId String @unique @default(dbgenerated()) @map("display_id") // PAY-000001
+
+  bakerId String @map("baker_id")
+  baker   Baker  @relation(fields: [bakerId], references: [id], onDelete: Cascade)
+
+  orderId String? @map("order_id")
+  order   Order?  @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  amount Decimal @map("amount") @db.Decimal(10, 2)
+
+  // CHECK: advance_received | balance_received | refund
+  eventType String @map("event_type")
+
+  // Preserved from the live PaymentLedger (not in the original spec) —
+  // required, matching the live RecordPaymentBody contract where
+  // paymentMethod is mandatory.
+  paymentMode String @map("payment_mode") // CHECK: CASH | UPI | CARD | BANK_TRANSFER
+  transactionReference String? @map("transaction_reference")
+
+  occurredAt DateTime @default(now()) @map("occurred_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([bakerId, orderId])
+  @@index([bakerId, occurredAt])
+  @@map("payment_events")
 }
 
-// ── Investment ──────────────────────────────────────────────
+// ── Investment ───────────────────────────────────────────────
+// Kept as a per-material purchase ledger (not genericized) per explicit
+// decision — `category` added alongside the existing material fields
+// rather than replacing them.
 model Investment {
-  id              String    @id @default(uuid())
-  
-  bakerId         String
-  baker           Baker     @relation(fields: [bakerId], references: [id], onDelete: Cascade)
-  
-  materialName    String
-  quantity        Decimal
-  unit            String
-  pricePerUnit    Int
-  totalCost       Int
-  supplier        String?
-  
-  purchaseDate    DateTime
-  
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  deletedAt       DateTime?
+  id String @id @default(uuid()) @map("id")
+  // Per-baker sequential code, not platform-wide — see Order.displayId
+  // for the identical rationale. Unique per-tenant only; see
+  // @@unique([bakerId, displayId]) below.
+  displayId String @default(dbgenerated()) @map("display_id")
+
+  bakerId String @map("baker_id")
+  baker   Baker  @relation(fields: [bakerId], references: [id], onDelete: Cascade)
+
+  purchaseDate DateTime @map("purchase_date") @db.Date
+
+  category    String  @map("category") // NEW, not enum
+  description String? @map("description") // NEW, optional free-text
+
+  materialName String  @map("material_name")
+  quantity     Decimal @map("quantity") @db.Decimal(10, 3)
+  unit         String  @map("unit")
+  pricePerUnit Decimal @map("price_per_unit") @db.Decimal(10, 2)
+  totalCost    Decimal @map("total_cost") @db.Decimal(10, 2) // server-computed: quantity * pricePerUnit
+  supplierName String? @map("supplier_name")
+
+  deletedAt DateTime? @map("deleted_at") // soft delete, preserved
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([bakerId, purchaseDate])
+  @@index([bakerId, category])
   @@index([bakerId, materialName])
-  @@index([purchaseDate])
+  @@unique([bakerId, displayId])
+  @@map("investments")
 }
 
-// ── WebhookEvent ──────────────────────────────────────────────
+// ── InventoryItem ── (new) ──────────────────────────────────
+model InventoryItem {
+  id        String @id @default(uuid()) @map("id")
+  displayId String @unique @default(dbgenerated()) @map("display_id") // ITM-0001
+
+  bakerId String @map("baker_id")
+  baker   Baker  @relation(fields: [bakerId], references: [id], onDelete: Cascade)
+
+  name               String   @map("name")
+  unit               String   @map("unit")
+  currentStock       Decimal  @default(0) @map("current_stock") @db.Decimal(10, 3)
+  lowStockThreshold  Decimal? @map("low_stock_threshold") @db.Decimal(10, 3)
+  supplierName       String?  @map("supplier_name") // plain text, no FK — wholesale is out of scope
+  lastPurchaseDate   DateTime? @map("last_purchase_date") @db.Date
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([bakerId])
+  @@index([bakerId, currentStock])
+  @@map("inventory_items")
+}
+
+// ── WebhookEvent ── (untouched) ──────────────────────────────
 // Idempotency table for Razorpay webhooks
 model WebhookEvent {
   id           String                  @id @default(uuid())
@@ -297,7 +313,7 @@ model WebhookEvent {
   errorMessage String?
 }
 
-// ── BillingHistory ────────────────────────────────────────────
+// ── BillingHistory ── (untouched) ─────────────────────────────
 // Immutable ledger of all subscription and billing events
 model BillingHistory {
   id             String   @id @default(uuid())
@@ -318,8 +334,7 @@ model BillingHistory {
   @@index([processedAt])
 }
 
-// ── EmailVerification ──────────────────────────────────────────
-// Stores hashed OTPs for email verification flow
+// ── EmailVerification ── (auth — untouched) ─────────────────
 model EmailVerification {
   id         String    @id @default(uuid())
   email      String
@@ -338,31 +353,14 @@ model EmailVerification {
   @@index([email, expiresAt])
 }
 
-// ── AuditLog ─────────────────────────────────────────────────
-// Durable, append-only security & activity audit trail.
-// Replaces the previous NoOpAuditService stub — every
-// auditService.logEvent() call in the auth flow (and beyond)
-// is now persisted here for investigation of OTP abuse,
-// failed logins, and refresh-token reuse/theft events.
+// ── AuditLog ── (untouched) ───────────────────────────────────
 model AuditLog {
   id        String   @id @default(uuid())
-
-  // e.g. EMAIL_OTP_SENT, EMAIL_OTP_VERIFICATION_SUCCESS,
-  //      REFRESH_TOKEN_REUSE_DETECTED, USER_LOGGED_OUT
   action    String
-
-  // Free-form subject of the event — bakerId, verification record id,
-  // or email, depending on the call site. Kept generic to match the
-  // existing AuditService.logEvent(action, entityId, metadata) contract.
   entityId  String
-
-  // Structured event context (email, ip, userAgent, sessionId, etc.)
   metadata  Json?
-
   createdAt DateTime @default(now())
 
   @@index([action, createdAt])
   @@index([entityId, createdAt])
 }
-
-

@@ -89,7 +89,25 @@ function parseEnv() {
     );
   }
 
-  return result.data;
+  const data = result.data;
+
+  // A live Razorpay key must never be reachable from a non-production
+  // process — refuse to boot rather than risk a real charge/subscription
+  // firing from a dev/test/staging environment. Live secrets belong only
+  // in the deployment platform's production secret store (see
+  // .env.production convention in .gitignore), never in a local .env.
+  if (data.NODE_ENV !== 'production' && data.RAZORPAY_KEY_ID?.startsWith('rzp_live_')) {
+    throw new Error(
+      '❌ RAZORPAY_KEY_ID is a LIVE Razorpay key (rzp_live_...) but NODE_ENV is ' +
+        `"${data.NODE_ENV}", not "production". Refusing to start.\n\n` +
+        'Live Razorpay keys must only ever be used in the real production ' +
+        'deployment (injected via the hosting platform\'s secret store or a ' +
+        '.env.production file that is never used locally). For local/dev/' +
+        'staging work, use a Razorpay TEST-mode key (rzp_test_...) instead.',
+    );
+  }
+
+  return data;
 }
 
 export const env = parseEnv();

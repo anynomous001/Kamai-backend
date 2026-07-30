@@ -2,6 +2,7 @@ export interface OrderData {
   orderNumber: string;
   items: Array<{ name: string; quantity: number }>;
   deliveryDate: Date;
+  deliveryType: 'pickup' | 'delivery';
   totalPrice: number;
   advancePaid: number;
   balanceDue: number;
@@ -11,9 +12,8 @@ export interface OrderData {
 }
 
 export class MessageFormatter {
-  static formatPrice(amountInPaise: number): string {
-    const rupees = amountInPaise / 100;
-    return `₹${rupees.toLocaleString('en-IN')}`;
+  static formatPrice(amountInRupees: number): string {
+    return `₹${amountInRupees.toLocaleString('en-IN')}`;
   }
 
   static formatDate(date: Date): string {

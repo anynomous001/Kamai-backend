@@ -7,7 +7,7 @@ export async function updateUpiSettings(bakerId: string, payload: UpdateUpiSetti
   // 1. Validate baker exists and fetch default business name
   const baker = await prisma.baker.findUnique({
     where: { id: bakerId },
-    select: { id: true, businessName: true, upiId: true },
+    select: { id: true, businessName: true, upiVpa: true },
   });
 
   if (!baker) {
@@ -25,33 +25,40 @@ export async function updateUpiSettings(bakerId: string, payload: UpdateUpiSetti
     const updated = await tx.baker.update({
       where: { id: bakerId },
       data: {
-        upiId: payload.upiId,
+        upiVpa: payload.upiId,
         merchantName: finalMerchantName,
         preferredApps: finalPreferredApps,
         defaultCollectionMethod: finalCollectionMethod,
-        dynamicQrEnabled: finalDynamicQr,
+        qrCodeEnabled: finalDynamicQr,
       },
       select: {
-        upiId: true,
+        upiVpa: true,
         merchantName: true,
         preferredApps: true,
         defaultCollectionMethod: true,
-        dynamicQrEnabled: true,
+        qrCodeEnabled: true,
         updatedAt: true,
       },
     });
 
     await auditService.logEvent('UPI_SETTINGS_UPDATED', bakerId, {
-      oldUpiId: baker.upiId,
-      newUpiId: updated.upiId,
+      oldUpiId: baker.upiVpa,
+      newUpiId: updated.upiVpa,
       merchantName: updated.merchantName,
       preferredApps: updated.preferredApps,
-      dynamicQrEnabled: updated.dynamicQrEnabled,
+      dynamicQrEnabled: updated.qrCodeEnabled,
       defaultCollectionMethod: updated.defaultCollectionMethod,
     });
 
     return updated;
   });
 
-  return updatedBaker;
+  return {
+    upiId: updatedBaker.upiVpa,
+    merchantName: updatedBaker.merchantName,
+    preferredApps: updatedBaker.preferredApps,
+    defaultCollectionMethod: updatedBaker.defaultCollectionMethod,
+    dynamicQrEnabled: updatedBaker.qrCodeEnabled,
+    updatedAt: updatedBaker.updatedAt,
+  };
 }

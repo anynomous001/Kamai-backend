@@ -18,8 +18,25 @@ export const authenticatePlugin = fp(
     app.decorate(
       'authenticate',
       async (req: FastifyRequest, _reply: FastifyReply) => {
-        // Development Authentication Bypass (only when no auth cookie is provided)
-        if (env.NODE_ENV !== 'production' && env.DEV_BYPASS_AUTH && !req.cookies.kamai_access_token) {
+        // Development Authentication Bypass — only for a genuinely fresh/
+        // anonymous request (no access token AND no refresh token cookie).
+        // Previously this checked only the access token's absence, which
+        // silently substituted the phantom DEV_BAKER_ID identity the
+        // instant a real session's short-lived access token expired
+        // (browser drops the cookie once its maxAge elapses) — a real
+        // logged-in user would see someone else's data with no error and
+        // no indication their session had died. A refresh token cookie
+        // (7-day maxAge, long outliving the 15-min access token) is
+        // reliable evidence a real session exists, so its presence now
+        // hard-disqualifies the bypass — that request instead falls
+        // through to the real 401 path below, which the frontend's
+        // refresh-and-retry handling can act on.
+        if (
+          env.NODE_ENV !== 'production' &&
+          env.DEV_BYPASS_AUTH &&
+          !req.cookies.kamai_access_token &&
+          !req.cookies.kamai_refresh_token
+        ) {
           const bakerId = env.DEV_BAKER_ID || 'dev-baker-id';
           const phone = env.DEV_PHONE || '+919999999999';
           const sessionId = env.DEV_SESSION_ID || 'dev-session';

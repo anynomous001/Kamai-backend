@@ -26,20 +26,20 @@ describe('Action 11 E2E: Customer Upsert', () => {
     });
   });
 
-  it('should create a new customer record if phone does not exist, then update LTV on next order', async () => {
+  it('should create a new customer record if phone does not exist, then update LTV (computed) on next order', async () => {
     const payload1 = {
       customer: {
         name: 'CRM Customer',
-        phone: '+919876543211',
+        phone: '9876543211',
         address: 'CRM Address',
       },
-      delivery: { date: '2026-10-10', time: '10:00' },
-      cake: { category: 'Cake', weight: '1kg', flavour: 'Vanilla' },
-      payment: { totalPrice: 100000, advancePaid: 100000 },
-      referencePhoto: null,
+      delivery: { type: 'pickup', date: '2026-10-10', time: '10:00' },
+      cake: { category: 'Cake', flavour: 'Vanilla' },
+      payment: { totalPrice: 1000, advancePaid: 1000 },
+      referencePhotoUrl: null,
     };
 
-    // First order: creates customer, LTV should become 100000
+    // First order: creates customer, LTV (computed) should become 1000
     const res1 = await app.inject({
       method: 'POST',
       url: '/api/orders',
@@ -48,15 +48,21 @@ describe('Action 11 E2E: Customer Upsert', () => {
     expect(res1.statusCode).toBe(200);
 
     const customer1 = await prisma.customer.findFirst({
-      where: { bakerId: 'test-baker-id', phone: '+919876543211' },
+      where: { bakerId: 'test-baker-id', phone: '9876543211' },
     });
-    expect(customer1?.lifetimeValue).toBe(100000);
-    expect(customer1?.totalOrders).toBe(1);
+    expect(customer1).toBeDefined();
 
-    // Second order: updates same customer, LTV should become 250000
+    const profile1 = await app.inject({
+      method: 'GET',
+      url: `/api/customers/${customer1!.id}`,
+    });
+    expect(JSON.parse(profile1.body).data.summary.lifetimeValue).toBe(1000);
+    expect(JSON.parse(profile1.body).data.summary.totalOrders).toBe(1);
+
+    // Second order: updates same customer, LTV should become 2500
     const payload2 = {
       ...payload1,
-      payment: { totalPrice: 150000, advancePaid: 150000 },
+      payment: { totalPrice: 1500, advancePaid: 1500 },
     };
     const res2 = await app.inject({
       method: 'POST',
@@ -65,10 +71,11 @@ describe('Action 11 E2E: Customer Upsert', () => {
     });
     expect(res2.statusCode).toBe(200);
 
-    const customer2 = await prisma.customer.findFirst({
-      where: { bakerId: 'test-baker-id', phone: '+919876543211' },
+    const profile2 = await app.inject({
+      method: 'GET',
+      url: `/api/customers/${customer1!.id}`,
     });
-    expect(customer2?.lifetimeValue).toBe(250000);
-    expect(customer2?.totalOrders).toBe(2);
+    expect(JSON.parse(profile2.body).data.summary.lifetimeValue).toBe(2500);
+    expect(JSON.parse(profile2.body).data.summary.totalOrders).toBe(2);
   });
 });

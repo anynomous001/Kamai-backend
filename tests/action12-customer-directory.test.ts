@@ -23,9 +23,7 @@ describe('Action 12 E2E: Customer Directory', () => {
       data: {
         bakerId: 'test-baker-id',
         name: 'Alice Directory',
-        phone: '+919876543212',
-        lifetimeValue: 100000,
-        totalOrders: 1,
+        phone: '9876543212',
       },
     });
   });

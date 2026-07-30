@@ -24,7 +24,7 @@ describe('Action 14 E2E: Update Customer Profile', () => {
       data: {
         bakerId: 'test-baker-id',
         name: 'Charlie Update',
-        phone: '+919876543214',
+        phone: '9876543214',
       },
     });
     customerId = cust.id;
@@ -42,7 +42,7 @@ describe('Action 14 E2E: Update Customer Profile', () => {
       url: `/api/customers/${customerId}`,
       payload: {
         name: 'Charlie Updated Name',
-        phone: '+919876543214',
+        phone: '9876543214',
         address: 'New Charlie Mansion',
         notes: 'Likes extra cream',
       },

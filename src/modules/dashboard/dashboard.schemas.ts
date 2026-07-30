@@ -3,12 +3,25 @@ import { z } from 'zod';
 export const OrderDtoSchema = z.object({
   id: z.string().uuid(),
   bakerId: z.string().uuid(),
+  orderNumber: z.string(),
   deliveryDate: z.string().datetime(),
-  status: z.enum(['DRAFT', 'IN_PRODUCTION', 'READY', 'DELIVERED', 'CANCELLED']),
-  totalPrice: z.number().int(),
-  balanceDue: z.number().int(),
+  status: z.enum(['Pending', 'Confirmed', 'In Progress', 'Ready', 'Delivered', 'Cancelled']),
+  totalPrice: z.number(),
+  balanceDue: z.number(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
+});
+
+export const UpcomingOrderDtoSchema = z.object({
+  id: z.string().uuid(),
+  orderNumber: z.string(),
+  customerName: z.string(),
+  cakeCategory: z.string(),
+  deliveryDate: z.string(),
+  deliveryTime: z.string().nullable(),
+  status: z.enum(['Pending', 'Confirmed', 'In Progress', 'Ready', 'Delivered', 'Cancelled']),
+  totalPrice: z.number(),
+  balanceDue: z.number(),
 });
 
 export const DashboardSummaryResponseSchema = z.object({
@@ -16,9 +29,13 @@ export const DashboardSummaryResponseSchema = z.object({
   data: z.object({
     todayDeliveries: z.number().int(),
     activeOrders: z.number().int(),
-    outstandingBalance: z.number().int(),
-    totalRevenue: z.number().int(),
+    outstandingBalance: z.number(),
+    totalRevenue: z.number(),
     todayOrders: z.array(OrderDtoSchema),
+    upcomingOrders: z.object({
+      month: z.string().nullable(),
+      orders: z.array(UpcomingOrderDtoSchema),
+    }),
   }),
 });
 
@@ -28,15 +45,34 @@ const orderJsonSchema = {
   properties: {
     id: { type: 'string', format: 'uuid' },
     bakerId: { type: 'string', format: 'uuid' },
+    orderNumber: { type: 'string' },
     deliveryDate: { type: 'string', format: 'date-time' },
     status: {
       type: 'string',
-      enum: ['DRAFT', 'IN_PRODUCTION', 'READY', 'DELIVERED', 'CANCELLED'],
+      enum: ['Pending', 'Confirmed', 'In Progress', 'Ready', 'Delivered', 'Cancelled'],
     },
-    totalPrice: { type: 'integer', description: 'Amount in paise' },
-    balanceDue: { type: 'integer', description: 'Amount in paise' },
+    totalPrice: { type: 'number', description: 'Amount in rupees' },
+    balanceDue: { type: 'number', description: 'Amount in rupees' },
     createdAt: { type: 'string', format: 'date-time' },
     updatedAt: { type: 'string', format: 'date-time' },
+  },
+};
+
+const upcomingOrderJsonSchema = {
+  type: 'object',
+  properties: {
+    id: { type: 'string', format: 'uuid' },
+    orderNumber: { type: 'string' },
+    customerName: { type: 'string' },
+    cakeCategory: { type: 'string' },
+    deliveryDate: { type: 'string', description: 'YYYY-MM-DD' },
+    deliveryTime: { type: 'string', nullable: true, description: 'HH:MM' },
+    status: {
+      type: 'string',
+      enum: ['Pending', 'Confirmed', 'In Progress', 'Ready', 'Delivered', 'Cancelled'],
+    },
+    totalPrice: { type: 'number', description: 'Amount in rupees' },
+    balanceDue: { type: 'number', description: 'Amount in rupees' },
   },
 };
 
@@ -55,11 +91,23 @@ export const dashboardSummaryJsonSchema = {
           properties: {
             todayDeliveries: { type: 'integer', example: 6 },
             activeOrders: { type: 'integer', example: 14 },
-            outstandingBalance: { type: 'integer', example: 13250 },
-            totalRevenue: { type: 'integer', example: 145800 },
+            outstandingBalance: { type: 'number', example: 13250 },
+            totalRevenue: { type: 'number', example: 145800 },
             todayOrders: {
               type: 'array',
               items: orderJsonSchema,
+            },
+            upcomingOrders: {
+              type: 'object',
+              description:
+                'Rest of the current month\'s upcoming (non-today, non-cancelled) orders; falls forward to the nearest future month with at least one order if none remain this month. month is null when there is no upcoming order at all.',
+              properties: {
+                month: { type: 'string', nullable: true, example: '2026-08' },
+                orders: {
+                  type: 'array',
+                  items: upcomingOrderJsonSchema,
+                },
+              },
             },
           },
         },
