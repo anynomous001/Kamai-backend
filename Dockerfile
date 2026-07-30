@@ -6,11 +6,11 @@
 # ── Stage 1: Dependencies ─────────────────────────────────────
 FROM node:22-alpine AS deps
 
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@9 --activate
 
 WORKDIR /app
 
-COPY package.json pnpm-lock.yaml* ./
+COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml* ./
 COPY prisma ./prisma/
 
 RUN pnpm install --frozen-lockfile --prod=false
@@ -18,7 +18,7 @@ RUN pnpm install --frozen-lockfile --prod=false
 # ── Stage 2: Builder ─────────────────────────────────────────
 FROM node:22-alpine AS builder
 
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@9 --activate
 
 WORKDIR /app
 
@@ -30,7 +30,7 @@ RUN pnpm run build
 # ── Stage 3: Production ───────────────────────────────────────
 FROM node:22-alpine AS production
 
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@9 --activate
 
 WORKDIR /app
 
@@ -40,7 +40,7 @@ ENV NODE_ENV=production
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 fastify
 
-COPY package.json pnpm-lock.yaml* ./
+COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml* ./
 COPY prisma ./prisma/
 
 # `prisma` (the CLI, needed to run `db:generate`/`prisma generate`
