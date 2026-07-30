@@ -12,9 +12,14 @@ import { SendEmailOtpBodySchema, VerifyEmailOtpBodySchema } from './auth.schemas
 const ACCESS_TOKEN_MAX_AGE = 15 * 60;           // 15 minutes in seconds
 const REFRESH_TOKEN_MAX_AGE = 7 * 24 * 60 * 60; // 7 days in seconds
 
+// Frontend (app.getkamai.online) and backend (onrender.com) are different
+// registrable domains, so this is a cross-site request from the browser's
+// point of view. SameSite=Strict (and even Lax) would stop the browser from
+// ever attaching these cookies to cross-site fetches, breaking auth entirely.
+// SameSite=None is required for cross-site cookies, which in turn requires Secure.
 const COOKIE_BASE = {
   httpOnly: true,
-  sameSite: 'strict' as const,
+  sameSite: env.NODE_ENV === 'production' ? ('none' as const) : ('lax' as const),
   path: '/',
   secure: env.NODE_ENV === 'production',
 } as const;

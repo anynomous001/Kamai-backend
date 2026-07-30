@@ -10,7 +10,9 @@ export const cookiePlugin = fp(async (app) => {
     parseOptions: {
       httpOnly: true,
       secure: env.NODE_ENV === 'production',
-      sameSite: env.NODE_ENV === 'production' ? 'strict' : 'lax',
+      // Cross-site (app.getkamai.online frontend -> onrender.com backend)
+      // requires SameSite=None; Strict/Lax would block the cookie entirely.
+      sameSite: env.NODE_ENV === 'production' ? 'none' : 'lax',
       path: '/',
     },
   });
