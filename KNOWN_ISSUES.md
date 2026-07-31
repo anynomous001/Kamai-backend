@@ -134,3 +134,81 @@ Consider using `vite-tsconfig-paths` plugin:
 ```
 pnpm add -D vite-tsconfig-paths
 ```
+
+---
+
+## KI-006 — Test suite: `DEV_BYPASS_AUTH` stub doesn't apply when a test file runs in isolation
+
+**Status:** ⚠️ Open
+**Discovered:** 2026-07-31 (Action 26 — Shareable Menu Link)
+
+### Issue
+
+Running a single test file directly (`vitest run tests/action26-shareable-menu-link.test.ts`, or any other single file) gets spurious 401s on every authenticated route, even though `tests/setup.ts` calls `vi.stubEnv('DEV_BYPASS_AUTH', 'true')`. Reproduces identically on pre-existing files (confirmed on `action16-investment-ledger.test.ts`), so this is not specific to any one test — every test file is affected when run alone.
+
+### Cause
+
+ES module imports are hoisted above other top-level statements within a file. In `tests/setup.ts`, `import { prisma } from '../shared/database/prisma.js'` (which transitively imports `src/config/env.ts` and parses `process.env` into the frozen `env` singleton) is hoisted ahead of the `vi.stubEnv(...)` calls that appear earlier in the file textually. `env.DEV_BYPASS_AUTH` therefore gets parsed from the real, un-stubbed `process.env` (default `false`, since `.env` doesn't set it) before the stub ever takes effect, and nothing re-parses it afterward.
+
+### Temporary Fix
+
+Pass the same values as real shell env vars instead of relying on the stub, e.g.:
+```
+NODE_ENV=test DEV_BYPASS_AUTH=true DEV_BAKER_ID=test-baker-id JWT_SECRET=... npx vitest run <file>
+```
+This sidesteps the hoisting order entirely since real `process.env` values are already present before any import executes.
+
+### Permanent Solution
+
+Not yet decided — options include restructuring `tests/setup.ts` so `vi.stubEnv` calls happen before any import that transitively loads `config/env.ts` (may require deferring that import), or moving the dev-bypass values into a dedicated `.env.test` loaded via `dotenv` before Vitest's module graph resolves. Needs a look before it's trusted for CI, since CI's `env:` block only sets `NODE_ENV`/secrets, not `DEV_BYPASS_AUTH` — worth confirming whether CI is actually affected or coincidentally sidesteps this the same way the temporary fix does.
+
+---
+
+## KI-007 — Test suite: shared `'test-baker-id'` fixture races when test files run concurrently
+
+**Status:** ⚠️ Open
+**Discovered:** 2026-07-31 (Action 26 — Shareable Menu Link)
+
+### Issue
+
+Running the full suite (`vitest run`, all ~25+ files) produces failures that don't reproduce when files are run individually — including in files unrelated to whatever change triggered the run (e.g. `tests/integration/orders.test.ts`, `tests/integration/inventory.test.ts` failing with `Unique constraint failed on the fields: (id)` or assertions on data that should exist but doesn't).
+
+### Cause
+
+Vitest runs test files concurrently (multiple worker processes) by default. Every test file in this suite creates/deletes/reads the same hardcoded `bakerId: 'test-baker-id'` row against the same live Supabase database, with no per-file or per-worker isolation. Two files' `beforeEach`/`beforeAll` hooks racing on that one row (one deleting+recreating it while another is mid-test) produces exactly this class of cross-file, seemingly-unrelated failure.
+
+### Temporary Fix
+
+Run test files sequentially, or run one file at a time, when you need a trustworthy result.
+
+### Permanent Solution
+
+Not yet decided — options include a unique baker fixture id per test file (or per Vitest worker), a dedicated/ephemeral test database instead of the shared live Supabase instance, or forcing sequential file execution (`fileParallelism: false` in `vitest.config.ts`, at the cost of slower runs). Will only get worse as more feature test files are added on top of the existing ~25 — each new file is another racer against the same fixture.
+
+---
+
+## KI-008 — Upload flows can orphan objects in Supabase Storage (no delete/sweep mechanism)
+
+**Status:** ⚠️ Open
+**Discovered:** 2026-07-31 (Action 26 — Shareable Menu Link, photo upload review)
+
+### Issue
+
+Two known instances of the same gap — an object gets written to Supabase Storage with no DB row ever referencing it, and nothing ever cleans it up:
+
+1. **`BUSINESS_LOGO`** (`baker-profile.service.ts` / the "Change Photo" flow) — confirms and overwrites `baker.logoPath` immediately on upload. The *previous* logo's object is never deleted, so every logo replacement orphans the old file.
+2. **`MENU_ITEM_PHOTO`** (`menu-items` module) — the signed-upload-url + direct-PUT happens the moment a file is chosen in the Add/Edit Menu Item form, before the menu item is created/saved. If the baker closes the sheet or navigates away after the photo finishes uploading but before submitting, the uploaded object has no referencing `MenuItem.photoPath` and never will (each upload gets a fresh `uuid()` path — see `uploads.service.ts` — so a later upload can't coincidentally reuse and "adopt" the orphaned path).
+
+Confirmed low-cost at current scale (small bucket, early-stage user base, private bucket so orphans aren't publicly discoverable) — not urgent, but unbounded: it grows with every logo change and every abandoned menu-item photo upload, with zero cleanup today.
+
+### Cause
+
+`StorageProvider` (`storage-provider.interface.ts`) has no `deleteObject`/`listObjects` method at all — cleanup was never built for either flow.
+
+### Temporary Fix
+
+None — accepted as-is for now given current scale.
+
+### Permanent Solution
+
+Not yet decided — should be built as **one** general-purpose orphan-sweep mechanism (list objects under a given prefix, diff against the relevant DB column's referenced paths, delete anything unreferenced and older than a grace period to avoid racing a legitimate in-flight upload), parameterized by folder prefix/grace period, rather than two separate one-off patches for logo vs. menu-item photos. Needs `StorageProvider.listObjects`/`deleteObject` plus a scheduled job to run it.
