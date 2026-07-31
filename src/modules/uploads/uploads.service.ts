@@ -10,6 +10,7 @@ import { UploadCategory } from './uploads.schemas.js';
 const ALLOWED_MIME_TYPES: Record<UploadCategory, string[]> = {
   BUSINESS_LOGO: ['image/png', 'image/jpeg', 'image/webp'],
   FSSAI_DOCUMENT: ['application/pdf', 'image/png', 'image/jpeg'],
+  MENU_ITEM_PHOTO: ['image/png', 'image/jpeg', 'image/webp'],
 };
 
 function getExtensionFromMime(mime: string): string {
@@ -21,7 +22,9 @@ function getExtensionFromMime(mime: string): string {
 }
 
 function getFolderForCategory(category: UploadCategory): string {
-  return category === UploadCategory.BUSINESS_LOGO ? 'logo' : 'fssai';
+  if (category === UploadCategory.BUSINESS_LOGO) return 'logo';
+  if (category === UploadCategory.MENU_ITEM_PHOTO) return 'menu-item-photos';
+  return 'fssai';
 }
 
 export async function generateUploadUrl(bakerId: string, contentType: string, category: UploadCategory) {
@@ -45,6 +48,14 @@ export async function generateUploadUrl(bakerId: string, contentType: string, ca
 }
 
 export async function confirmUpload(bakerId: string, filePath: string, category: UploadCategory) {
+  // This endpoint only writes directly onto the Baker row. MENU_ITEM_PHOTO
+  // (and any future per-entity category) is confirmed as part of creating/
+  // updating that entity instead (see menu-items.service.ts) — without this
+  // guard an unrecognized category would silently succeed with a no-op below.
+  if (category !== UploadCategory.BUSINESS_LOGO && category !== UploadCategory.FSSAI_DOCUMENT) {
+    throw new BadRequestError(`Category '${category}' is not confirmed via this endpoint`);
+  }
+
   // 1. Verify object exists in storage
   const exists = await storageProvider.verifyObjectExists(filePath);
   if (!exists) {

@@ -24,6 +24,8 @@ import { bakerRoutes } from './modules/baker/baker.routes.js';
 import { uploadsRoutes } from './modules/uploads/uploads.routes.js';
 import { notificationsRoutes } from './modules/notifications/notifications.routes.js';
 import { supportRoutes } from './modules/support/support.routes.js';
+import { menuItemsRoutes } from './modules/menu-items/menu-items.routes.js';
+import { publicMenuRoutes } from './modules/public-menu/public-menu.routes.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -133,6 +135,12 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(uploadsRoutes, { prefix: '/api/uploads' });
   await app.register(notificationsRoutes, { prefix: '/api/notifications' });
   await app.register(supportRoutes, { prefix: '/api/support' });
+  await app.register(menuItemsRoutes, { prefix: '/api/menu-items' });
+  // Only unauthenticated route in the app — no authenticatePlugin preHandler,
+  // deliberately registered alongside the rest rather than before the
+  // ── Feature Routes ── block, so it's obvious it isn't special-cased at
+  // the plugin level, only at the route level (see public-menu.routes.ts).
+  await app.register(publicMenuRoutes, { prefix: '/api/public/menu' });
 
   return app;
 }

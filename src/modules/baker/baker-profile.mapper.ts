@@ -20,6 +20,11 @@ export class BakerProfileMapper {
         // Generic tenant verification flag — distinct from fssaiVerified below.
         accountVerified: baker.isVerified,
       },
+      menu: {
+        menuSlug: baker.menuSlug,
+        menuSlugEditable: baker.menuSlugEditedAt === null,
+        whatsappNumber: baker.whatsappNumber,
+      },
       verification: {
         fssaiNumber: baker.fssaiNumber,
         fssaiVerified: baker.fssaiVerified,

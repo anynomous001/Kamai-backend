@@ -2,6 +2,7 @@ import { z } from 'zod';
 export enum UploadCategory {
   BUSINESS_LOGO = 'BUSINESS_LOGO',
   FSSAI_DOCUMENT = 'FSSAI_DOCUMENT',
+  MENU_ITEM_PHOTO = 'MENU_ITEM_PHOTO',
 }
 
 export const GenerateUploadUrlBodySchema = z.object({

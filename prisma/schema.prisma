@@ -63,6 +63,11 @@ model Baker {
 
   gstNumber String? @map("gst_number")
 
+  // Shareable public menu (Action 26)
+  menuSlug         String?   @unique @map("menu_slug") // URL-safe, auto-generated from businessName on first menu item created; editable once
+  menuSlugEditedAt DateTime? @map("menu_slug_edited_at") // null = still editable; set = one-time edit already used
+  whatsappNumber   String?   @map("whatsapp_number") // public order-contact number for the shareable menu; distinct from phoneNumber (login), may not be set
+
   // Payment / collection settings
   upiVpa                  String?  @map("upi_vpa")
   merchantName             String?  @map("merchant_name") // display name shown on the UPI/QR page; defaults to businessName if unset — preserved, not in original spec
@@ -104,6 +109,7 @@ model Baker {
   investments    Investment[]
   inventoryItems InventoryItem[]
   billingHistory BillingHistory[]
+  menuItems      MenuItem[]
 
   @@map("bakers")
 }
@@ -301,6 +307,35 @@ model InventoryItem {
   @@index([bakerId])
   @@index([bakerId, currentStock])
   @@map("inventory_items")
+}
+
+// ── MenuItem ── (Action 26 — Shareable Menu Link) ───────────
+// Powers the baker-managed catalog behind the public, unauthenticated
+// menu page. isAvailable gates public visibility (sold-out items are
+// never returned by the public endpoint); sortOrder is the baker's
+// chosen display order, reassigned wholesale by the reorder endpoint.
+model MenuItem {
+  id String @id @default(uuid()) @map("id")
+
+  bakerId String @map("baker_id")
+  baker   Baker  @relation(fields: [bakerId], references: [id], onDelete: Cascade)
+
+  name        String  @map("name")
+  category    String? @map("category")
+  price       Decimal @map("price") @db.Decimal(10, 2) // CHECK > 0
+  unit        String  @map("unit") // CHECK: per_kg | per_piece | per_box | per_dozen
+  description String? @map("description")
+  photoPath   String? @map("photo_path") // storage path; signed read URL generated on request, same pattern as Baker.logoPath
+
+  isAvailable Boolean @default(true) @map("is_available")
+  sortOrder   Int     @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([bakerId, sortOrder])
+  @@index([bakerId, isAvailable])
+  @@map("menu_items")
 }
 
 // ── WebhookEvent ── (untouched) ──────────────────────────────

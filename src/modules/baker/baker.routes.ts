@@ -1,7 +1,17 @@
 import type { FastifyInstance } from 'fastify';
 
-import { updateUpiSettingsHandler, getBakerProfileHandler, updateBakerProfileHandler } from './baker.controller.js';
-import { UpdateUpiSettingsSchema, GetBakerProfileSchema, UpdateBakerProfileSchema } from './baker.schemas.js';
+import {
+  updateUpiSettingsHandler,
+  getBakerProfileHandler,
+  updateBakerProfileHandler,
+  updateMenuSlugHandler,
+} from './baker.controller.js';
+import {
+  UpdateUpiSettingsSchema,
+  GetBakerProfileSchema,
+  UpdateBakerProfileSchema,
+  UpdateMenuSlugSchema,
+} from './baker.schemas.js';
 
 export async function bakerRoutes(app: FastifyInstance) {
   app.put('/upi-settings', {
@@ -20,5 +30,11 @@ export async function bakerRoutes(app: FastifyInstance) {
     schema: UpdateBakerProfileSchema,
     preHandler: [app.authenticate],
     handler: updateBakerProfileHandler,
+  });
+
+  app.patch('/menu-slug', {
+    schema: UpdateMenuSlugSchema,
+    preHandler: [app.authenticate],
+    handler: updateMenuSlugHandler,
   });
 }

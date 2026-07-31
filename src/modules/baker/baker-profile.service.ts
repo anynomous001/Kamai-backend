@@ -16,6 +16,9 @@ export async function getBakerProfile(bakerId: string) {
       phoneNumber: true,
       email: true,
       logoPath: true,
+      menuSlug: true,
+      menuSlugEditedAt: true,
+      whatsappNumber: true,
       fssaiNumber: true,
       isVerified: true,
       fssaiVerified: true,
@@ -57,7 +60,7 @@ export async function getBakerProfile(bakerId: string) {
 export async function updateBakerProfile(bakerId: string, payload: UpdateBakerProfileBody) {
   const baker = await prisma.baker.findUnique({
     where: { id: bakerId },
-    select: { id: true, ownerName: true, phoneNumber: true, defaultAdvancePercentage: true },
+    select: { id: true, ownerName: true, phoneNumber: true, defaultAdvancePercentage: true, whatsappNumber: true },
   });
 
   if (!baker) {
@@ -73,8 +76,15 @@ export async function updateBakerProfile(bakerId: string, payload: UpdateBakerPr
         ...(payload.defaultAdvancePercentage !== undefined
           ? { defaultAdvancePercentage: payload.defaultAdvancePercentage }
           : {}),
+        ...(payload.whatsappNumber !== undefined ? { whatsappNumber: payload.whatsappNumber } : {}),
       },
-      select: { ownerName: true, phoneNumber: true, defaultAdvancePercentage: true, updatedAt: true },
+      select: {
+        ownerName: true,
+        phoneNumber: true,
+        defaultAdvancePercentage: true,
+        whatsappNumber: true,
+        updatedAt: true,
+      },
     });
 
     await auditService.logEvent('BAKER_PROFILE_UPDATED', bakerId, {
@@ -84,6 +94,8 @@ export async function updateBakerProfile(bakerId: string, payload: UpdateBakerPr
       newPhone: updated.phoneNumber,
       oldDefaultAdvancePercentage: baker.defaultAdvancePercentage,
       newDefaultAdvancePercentage: updated.defaultAdvancePercentage,
+      oldWhatsappNumber: baker.whatsappNumber,
+      newWhatsappNumber: updated.whatsappNumber,
     });
 
     return updated;
@@ -94,6 +106,7 @@ export async function updateBakerProfile(bakerId: string, payload: UpdateBakerPr
     phone: updatedBaker.phoneNumber,
     defaultAdvancePercentage:
       updatedBaker.defaultAdvancePercentage !== null ? Number(updatedBaker.defaultAdvancePercentage) : null,
+    whatsappNumber: updatedBaker.whatsappNumber,
     updatedAt: updatedBaker.updatedAt,
   };
 }

@@ -2,7 +2,8 @@ import type { FastifyRequest, FastifyReply } from 'fastify';
 
 import { updateUpiSettings } from './payment-settings.service.js';
 import { getBakerProfile, updateBakerProfile } from './baker-profile.service.js';
-import type { UpdateUpiSettingsBody, UpdateBakerProfileBody } from './baker.schemas.js';
+import { editMenuSlug } from './menu-slug.service.js';
+import type { UpdateUpiSettingsBody, UpdateBakerProfileBody, UpdateMenuSlugBody } from './baker.schemas.js';
 
 export async function updateUpiSettingsHandler(
   req: FastifyRequest<{ Body: UpdateUpiSettingsBody }>,
@@ -58,5 +59,22 @@ export async function updateBakerProfileHandler(
       ...updated,
       updatedAt: updated.updatedAt.toISOString(),
     },
+  });
+}
+
+export async function updateMenuSlugHandler(
+  req: FastifyRequest<{ Body: UpdateMenuSlugBody }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const bakerId = req.user?.id;
+  if (!bakerId) {
+    return reply.code(401).send({ success: false, errorCode: 'UNAUTHORIZED' });
+  }
+
+  const menuSlug = await editMenuSlug(bakerId, req.body.menuSlug);
+
+  return reply.code(200).send({
+    success: true,
+    data: { menuSlug },
   });
 }

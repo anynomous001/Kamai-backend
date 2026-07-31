@@ -32,10 +32,47 @@ export const UpdateBakerProfileBodySchema = z
     ownerName: z.string().min(1).max(120).optional(),
     phone: z.string().regex(/^[6-9]\d{9}$/, 'Must be a valid 10-digit Indian mobile number').optional(),
     defaultAdvancePercentage: z.number().min(0).max(100).optional(),
+    // Public order-contact number shown on the shareable menu (Action 26) —
+    // distinct from `phone` above (login), no endpoint set this until now.
+    whatsappNumber: z.string().regex(/^[6-9]\d{9}$/, 'Must be a valid 10-digit Indian mobile number').optional(),
   })
   .refine((data) => Object.keys(data).length > 0, { message: 'At least one field must be provided' });
 
 export type UpdateBakerProfileBody = z.infer<typeof UpdateBakerProfileBodySchema>;
+
+// ── PATCH /api/baker/menu-slug ── (Action 26) ───────────────
+export const UpdateMenuSlugBodySchema = z.object({
+  menuSlug: z.string().min(1, 'menuSlug is required').max(60),
+});
+
+export type UpdateMenuSlugBody = z.infer<typeof UpdateMenuSlugBodySchema>;
+
+export const UpdateMenuSlugSchema = {
+  description:
+    "One-time edit of the baker's shareable menu link slug. Rejects with 400 if the one-time edit has already been used, or if the requested slug is taken.",
+  tags: ['Baker Profile'],
+  security: [{ bearerAuth: [] }],
+  body: {
+    type: 'object',
+    required: ['menuSlug'],
+    properties: { menuSlug: { type: 'string', example: 'ananyas-home-bakery' } },
+  },
+  response: {
+    200: {
+      description: 'Menu slug updated',
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        data: { type: 'object', properties: { menuSlug: { type: 'string' } } },
+      },
+    },
+    400: {
+      description: 'Edit already used, slug taken, or invalid slug',
+      type: 'object',
+      properties: { success: { type: 'boolean' }, errorCode: { type: 'string' }, message: { type: 'string' } },
+    },
+  },
+};
 
 export const GetBakerProfileResponseSchema = z.object({
   success: z.boolean(),
@@ -47,6 +84,11 @@ export const GetBakerProfileResponseSchema = z.object({
       email: z.string().nullable(),
       logoUrl: z.string().nullable(),
       accountVerified: z.boolean(),
+    }),
+    menu: z.object({
+      menuSlug: z.string().nullable(),
+      menuSlugEditable: z.boolean(),
+      whatsappNumber: z.string().nullable(),
     }),
     verification: z.object({
       fssaiNumber: z.string().nullable(),
@@ -135,6 +177,7 @@ export const UpdateBakerProfileSchema = {
       ownerName: { type: 'string', example: 'Priya Sharma' },
       phone: { type: 'string', example: '9876543210' },
       defaultAdvancePercentage: { type: 'number', minimum: 0, maximum: 100, example: 50 },
+      whatsappNumber: { type: 'string', example: '9876543210' },
     },
   },
   response: {
@@ -149,6 +192,7 @@ export const UpdateBakerProfileSchema = {
             ownerName: { type: 'string', nullable: true },
             phone: { type: 'string', nullable: true },
             defaultAdvancePercentage: { type: 'number', nullable: true },
+            whatsappNumber: { type: 'string', nullable: true },
             updatedAt: { type: 'string', format: 'date-time' },
           },
         },
@@ -188,6 +232,14 @@ export const GetBakerProfileSchema = {
                 email: { type: 'string', nullable: true },
                 logoUrl: { type: 'string', nullable: true },
                 accountVerified: { type: 'boolean' },
+              },
+            },
+            menu: {
+              type: 'object',
+              properties: {
+                menuSlug: { type: 'string', nullable: true },
+                menuSlugEditable: { type: 'boolean' },
+                whatsappNumber: { type: 'string', nullable: true },
               },
             },
             verification: {
