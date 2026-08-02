@@ -18,6 +18,8 @@ import {
   updateOrderJsonSchema,
   cancelOrderJsonSchema,
 } from './orders.schemas.js';
+import { generateReceiptImageHandler } from './receipt-image/receipt-image.controller.js';
+import { generateReceiptImageJsonSchema } from './receipt-image/receipt-image.schemas.js';
 
 /**
  * Orders Routes
@@ -32,6 +34,7 @@ import {
  *   DELETE /api/orders/:orderNumber     — Cancel/Archive order
  *   PATCH /api/orders/:orderNumber/status — Update order status
  *   PATCH /api/orders/:orderNumber/payment — Record balance payment
+ *   POST  /api/orders/:orderNumber/receipt-image — Generate a branded receipt image (on demand)
  */
 export async function ordersRoutes(app: FastifyInstance) {
   app.post('/', {
@@ -62,6 +65,12 @@ export async function ordersRoutes(app: FastifyInstance) {
     schema: recordPaymentJsonSchema,
     preHandler: [app.authenticate],
     handler: recordPayment,
+  });
+
+  app.post('/:orderNumber/receipt-image', {
+    schema: generateReceiptImageJsonSchema,
+    preHandler: [app.authenticate],
+    handler: generateReceiptImageHandler,
   });
 
   app.put('/:orderNumber', {

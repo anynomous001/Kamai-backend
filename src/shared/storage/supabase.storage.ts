@@ -132,6 +132,19 @@ export class SupabaseStorageProvider implements StorageProvider {
 
     return data.signedUrl;
   }
+
+  async uploadObject(path: string, data: Buffer, contentType: string): Promise<{ filePath: string }> {
+    const client = this.getClient();
+    const { error } = await client.storage
+      .from(this.bucket)
+      .upload(path, data, { contentType, upsert: true });
+
+    if (error) {
+      throw new InternalServerError(`Failed to upload object: ${error.message}`);
+    }
+
+    return { filePath: path };
+  }
 }
 
 export const storageProvider = new SupabaseStorageProvider();
