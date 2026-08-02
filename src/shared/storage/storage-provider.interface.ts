@@ -17,10 +17,18 @@ export interface StorageProvider {
    * Verifies if an object successfully exists at the given path.
    * Useful for confirming a client upload completed.
    *
+   * Distinguishes two failure modes rather than collapsing both to `false`:
+   * resolves `false` only when the storage API call succeeded and genuinely
+   * found no object at `path`. If the API call itself fails (timeout, 5xx,
+   * network error) after retrying, it throws `StorageVerificationError`
+   * instead — that failure mode is not the caller's fault and must not be
+   * reported to the client as "bad path".
+   *
    * @param path The full storage key/path
+   * @param context Optional fields (e.g. bakerId, category) merged into log entries for this check
    * @returns True if the object exists
    */
-  verifyObjectExists(path: string): Promise<boolean>;
+  verifyObjectExists(path: string, context?: Record<string, unknown>): Promise<boolean>;
 
   /**
    * Generates a short-lived signed URL to read an object securely.

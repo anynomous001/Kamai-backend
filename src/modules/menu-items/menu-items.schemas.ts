@@ -59,7 +59,11 @@ export const createMenuItemJsonSchema = {
     400: {
       description: 'Validation error',
       type: 'object',
-      properties: { success: { type: 'boolean', default: false }, error: { type: 'string' } },
+      properties: {
+        success: { type: 'boolean', default: false },
+        message: { type: 'string' },
+        errorCode: { type: 'string' },
+      },
     },
   },
 };
@@ -134,7 +138,11 @@ export const updateMenuItemJsonSchema = {
     404: {
       description: 'Menu item not found',
       type: 'object',
-      properties: { success: { type: 'boolean', default: false }, error: { type: 'string' } },
+      properties: {
+        success: { type: 'boolean', default: false },
+        message: { type: 'string' },
+        errorCode: { type: 'string' },
+      },
     },
   },
 };
@@ -159,7 +167,11 @@ export const deleteMenuItemJsonSchema = {
     404: {
       description: 'Menu item not found',
       type: 'object',
-      properties: { success: { type: 'boolean', default: false }, error: { type: 'string' } },
+      properties: {
+        success: { type: 'boolean', default: false },
+        message: { type: 'string' },
+        errorCode: { type: 'string' },
+      },
     },
   },
 };
@@ -200,7 +212,11 @@ export const reorderMenuItemsJsonSchema = {
     400: {
       description: 'menuItemIds does not exactly match the baker\'s current menu items',
       type: 'object',
-      properties: { success: { type: 'boolean', default: false }, error: { type: 'string' } },
+      properties: {
+        success: { type: 'boolean', default: false },
+        message: { type: 'string' },
+        errorCode: { type: 'string' },
+      },
     },
   },
 };

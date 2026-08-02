@@ -18,6 +18,7 @@ export type ErrorCode =
   | 'TOO_MANY_REQUESTS'
   | 'BAD_REQUEST'
   | 'SERVICE_UNAVAILABLE'
+  | 'STORAGE_VERIFICATION_FAILED'
   | 'SUPPORT_NOT_CONFIGURED'
   // Auth
   | 'INVALID_CREDENTIALS'
@@ -159,5 +160,21 @@ export class ServiceUnavailableError extends AppError {
 export class InternalServerError extends AppError {
   constructor(message = 'Internal server error', details?: AppErrorDetails) {
     super(message, 500, 'INTERNAL_SERVER_ERROR', details, false);
+  }
+}
+
+// ── 503 Storage Verification Failure ─────────────────────────
+// Thrown when confirming an upload can't be verified because the storage
+// provider's API call itself failed (network/timeout/5xx) — as opposed to
+// the call succeeding but genuinely finding no object at the given path.
+// Kept distinct from BadRequestError so it (a) surfaces as a retryable
+// server-side condition rather than "you gave us a bad path", and (b) gets
+// picked up by the global error handler's >=500 logging automatically.
+export class StorageVerificationError extends AppError {
+  constructor(
+    message = 'Failed to verify uploaded file due to a storage service error',
+    details?: AppErrorDetails,
+  ) {
+    super(message, 503, 'STORAGE_VERIFICATION_FAILED', details);
   }
 }

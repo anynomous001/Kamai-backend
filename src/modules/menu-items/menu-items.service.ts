@@ -42,8 +42,8 @@ async function toResponse(item: MenuItemRecord) {
   };
 }
 
-async function verifyPhotoPath(photoPath: string): Promise<void> {
-  const exists = await storageProvider.verifyObjectExists(photoPath);
+async function verifyPhotoPath(photoPath: string, context: Record<string, unknown>): Promise<void> {
+  const exists = await storageProvider.verifyObjectExists(photoPath, context);
   if (!exists) {
     throw new BadRequestError('photoPath does not point to an uploaded file — upload via /api/uploads/signed-url first');
   }
@@ -66,7 +66,7 @@ async function ensureMenuSlug(bakerId: string): Promise<void> {
 
 export async function createMenuItem(bakerId: string, payload: CreateMenuItemBody) {
   if (payload.photoPath) {
-    await verifyPhotoPath(payload.photoPath);
+    await verifyPhotoPath(payload.photoPath, { bakerId, category: 'MENU_ITEM_PHOTO', op: 'createMenuItem' });
   }
 
   // First menu item "publishes" the menu — lazily assign the shareable slug.
@@ -120,7 +120,7 @@ export async function updateMenuItem(bakerId: string, id: string, payload: Updat
   }
 
   if (payload.photoPath) {
-    await verifyPhotoPath(payload.photoPath);
+    await verifyPhotoPath(payload.photoPath, { bakerId, category: 'MENU_ITEM_PHOTO', op: 'updateMenuItem', menuItemId: id });
   }
 
   const updated = await prisma.menuItem.update({

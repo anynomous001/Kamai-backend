@@ -57,7 +57,11 @@ export async function confirmUpload(bakerId: string, filePath: string, category:
   }
 
   // 1. Verify object exists in storage
-  const exists = await storageProvider.verifyObjectExists(filePath);
+  const exists = await storageProvider.verifyObjectExists(filePath, {
+    bakerId,
+    category,
+    op: 'confirmUpload',
+  });
   if (!exists) {
     throw new BadRequestError('Upload confirmation failed: File not found in storage');
   }
