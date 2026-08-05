@@ -77,6 +77,7 @@ export const UpdateMenuSlugSchema = {
 export const GetBakerProfileResponseSchema = z.object({
   success: z.boolean(),
   data: z.object({
+    id: z.string().uuid(),
     business: z.object({
       businessName: z.string().nullable(),
       ownerName: z.string().nullable(),
@@ -223,6 +224,7 @@ export const GetBakerProfileSchema = {
         data: {
           type: 'object',
           properties: {
+            id: { type: 'string', format: 'uuid' },
             business: {
               type: 'object',
               properties: {
