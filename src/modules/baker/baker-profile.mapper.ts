@@ -11,6 +11,7 @@ export class BakerProfileMapper {
     }
 
     return {
+      id: baker.id,
       business: {
         businessName: baker.businessName,
         ownerName: baker.ownerName,
