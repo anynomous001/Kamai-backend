@@ -2,9 +2,9 @@ name: Kamai Backend CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, stage, development]
   pull_request:
-    branches: [main, develop]
+    branches: [main, stage, development]
 
 env:
   NODE_VERSION: '22'
