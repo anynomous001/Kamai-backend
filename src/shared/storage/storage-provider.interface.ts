@@ -38,4 +38,17 @@ export interface StorageProvider {
    * @returns The signed URL or null if an error occurs
    */
   getSignedReadUrl(path: string, expiresInSeconds: number): Promise<string | null>;
+
+  /**
+   * Uploads a buffer directly from the server (as opposed to the
+   * generateSignedUploadUrl + client-PUT flow, which is for client uploads).
+   * Upserts by default — callers that want a stable, reusable path (so
+   * regenerating doesn't orphan the previous object) should pass the same
+   * path on every call.
+   *
+   * @param path The full storage key/path
+   * @param data The file contents
+   * @param contentType The MIME type of the file
+   */
+  uploadObject(path: string, data: Buffer, contentType: string): Promise<{ filePath: string }>;
 }

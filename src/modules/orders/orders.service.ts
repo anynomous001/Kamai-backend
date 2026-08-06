@@ -240,6 +240,14 @@ export class OrdersService {
     }
 
     return {
+      // NOTE: `orderId` here is the *display* id (e.g. "ORD-000001"), not a
+      // UUID — kept as-is for backward compatibility with existing callers.
+      // `id` below is the actual internal UUID, needed by endpoints like
+      // POST /api/notifications/whatsapp that key off it instead of the
+      // display id. The list endpoint (GET /api/orders) confusingly calls
+      // the UUID `orderId` — the two endpoints do not share field meaning
+      // for that name.
+      id: order.id,
       orderId: order.displayId,
       status: order.orderStatus,
       customer: {

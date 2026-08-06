@@ -241,7 +241,8 @@ export const getOrderJsonSchema = {
         data: {
           type: 'object',
           properties: {
-            orderId: { type: 'string' },
+            id: { type: 'string', format: 'uuid', description: 'Internal UUID — use this for endpoints keyed off the order id (e.g. POST /api/notifications/whatsapp), not orderId.' },
+            orderId: { type: 'string', description: 'Display id (e.g. "ORD-000001"), not a UUID — do not confuse with the same-named field on GET /api/orders, which is the UUID there.' },
             status: { type: 'string' },
             customer: {
               type: 'object',
