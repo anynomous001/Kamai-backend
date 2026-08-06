@@ -14,11 +14,11 @@ import { buildReceiptCardTree, CARD_WIDTH, CARD_HEIGHT, type ReceiptCardData } f
 const READ_URL_EXPIRES_IN_SECONDS = 3600; // matches the existing menu-item-photo / baker-logo pattern
 
 async function fetchLogoDataUri(logoPath: string | null, bakerId: string): Promise<string | null> {
-  if (!logoPath) return null;
+  if (logoPath == null) return null;
 
   try {
     const signedUrl = await storageProvider.getSignedReadUrl(logoPath, READ_URL_EXPIRES_IN_SECONDS);
-    if (!signedUrl) return null;
+    if (signedUrl == null) return null;
 
     const response = await fetch(signedUrl);
     if (!response.ok) {
@@ -26,7 +26,7 @@ async function fetchLogoDataUri(logoPath: string | null, bakerId: string): Promi
       return null;
     }
 
-    const contentType = response.headers.get('content-type') || 'image/png';
+    const contentType = response.headers.get('content-type') ?? 'image/png';
     const bytes = Buffer.from(await response.arrayBuffer());
     return `data:${contentType};base64,${bytes.toString('base64')}`;
   } catch (err) {
@@ -77,7 +77,7 @@ export async function generateReceiptImage(bakerId: string, orderNumber: string)
   const balanceDue = Number(order.balanceDue);
 
   const cardData: ReceiptCardData = {
-    businessName: order.baker.businessName || 'Your Baker',
+    businessName: order.baker.businessName ?? 'Your Baker',
     logoDataUri,
     orderNumber: order.displayId,
     customerName: order.customer.name,
@@ -105,7 +105,7 @@ export async function generateReceiptImage(bakerId: string, orderNumber: string)
   await storageProvider.uploadObject(filePath, png, 'image/png');
 
   const imageUrl = await storageProvider.getSignedReadUrl(filePath, READ_URL_EXPIRES_IN_SECONDS);
-  if (!imageUrl) {
+  if (imageUrl == null) {
     throw new NotFoundError('Receipt image was generated but could not be signed for reading');
   }
 

@@ -77,7 +77,7 @@ export interface ReceiptCardData {
 }
 
 function logoNode(data: ReceiptCardData): Node {
-  if (data.logoDataUri) {
+  if (data.logoDataUri != null) {
     return { type: 'img', props: { src: data.logoDataUri, width: 132, height: 132, style: { borderRadius: 999, objectFit: 'cover' } } };
   }
   const initial = (data.businessName.trim()[0] || '?').toUpperCase();
@@ -148,7 +148,7 @@ export function buildReceiptCardTree(data: ReceiptCardData): Node {
                 { justifyContent: 'space-between', marginTop: 18 },
               ),
               { type: 'div', props: { style: { width: '100%', height: 1, background: COLORS.line, margin: '18px 0' } } },
-              data.balanceDueText
+              data.balanceDueText != null
                 ? row(
                     [text('Balance due', { fontWeight: 600, fontSize: 26 }), text(data.balanceDueText, { fontWeight: 600, fontSize: 26 })],
                     {

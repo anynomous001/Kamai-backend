@@ -10,7 +10,7 @@ export async function generateReceiptImageHandler(
   reply: FastifyReply,
 ): Promise<void> {
   const bakerId = req.user?.id;
-  if (!bakerId) {
+  if (bakerId == null) {
     throw new InternalServerError('Baker context is missing in authenticated request');
   }
 
