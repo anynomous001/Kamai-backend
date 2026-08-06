@@ -39,7 +39,8 @@ export type ErrorCode =
   | 'BAKER_NOT_FOUND'
   | 'INVALID_ORDER_STATUS_TRANSITION'
   | 'ORDER_ALREADY_CANCELLED'
-  | 'ORDER_ALREADY_DELIVERED';
+  | 'ORDER_ALREADY_DELIVERED'
+  | 'WHATSAPP_RECEIPT_DISABLED';
 
 
 export interface AppErrorDetails {
@@ -94,6 +95,13 @@ export class UnauthorizedError extends AppError {
 export class ForbiddenError extends AppError {
   constructor(message = 'Forbidden', details?: AppErrorDetails) {
     super(message, 403, 'FORBIDDEN', details);
+  }
+}
+
+// ── 403 WhatsApp Receipt Disabled ─────────────────────────────
+export class WhatsAppReceiptDisabledError extends AppError {
+  constructor(message = 'WhatsApp receipts are disabled for this baker profile', details?: AppErrorDetails) {
+    super(message, 403, 'WHATSAPP_RECEIPT_DISABLED', details);
   }
 }
 
