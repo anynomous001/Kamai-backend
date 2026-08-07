@@ -7,11 +7,12 @@ export async function processWebhookEvent(event: {
   eventId: string;
   eventType: string;
   subscriptionId: string;
+  customerId?: string;
   paymentId?: string;
   amount?: number;
   currency?: string;
 }): Promise<void> {
-  const { eventId, eventType, subscriptionId, paymentId, amount, currency } = event;
+  const { eventId, eventType, subscriptionId, customerId, paymentId, amount, currency } = event;
 
   // Known subscription states map
   const stateMap: Record<string, 'ACTIVE' | 'PAUSED' | 'CANCELLED' | 'EXPIRED'> = {
@@ -56,7 +57,10 @@ export async function processWebhookEvent(event: {
       // We will just update the status.
       await tx.baker.update({
         where: { id: baker.id },
-        data: { subscriptionStatus: newState },
+        data: {
+          subscriptionStatus: newState,
+          ...(customerId != null ? { razorpayCustomerId: customerId } : {}),
+        },
       });
 
       // 4. Insert Billing History
