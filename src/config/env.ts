@@ -51,6 +51,7 @@ const envSchema = z.object({
   RAZORPAY_KEY_SECRET: z.string().optional(),
   RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
   RAZORPAY_EARLY_ADOPTER_PLAN_ID: z.string().optional(),
+  RAZORPAY_STANDARD_PLAN_ID: z.string().optional(),
 
   // Twilio
   TWILIO_ACCOUNT_SID: z.string().optional(),
