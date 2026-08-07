@@ -80,14 +80,23 @@ model Baker {
   // Kept as the full 6-state vocab (not the 4-state draft) because
   // billing.service.ts's Razorpay webhook state map depends on all 6.
   subscriptionStatus     String    @default("TRIAL") @map("subscription_status")
-  subscriptionPlan       String?   @map("subscription_plan") // CHECK: EARLY_ADOPTER — preserved, distinct from isEarlyAdopter
+  subscriptionPlan       String?   @map("subscription_plan") // CHECK: EARLY_ADOPTER | STANDARD — preserved, distinct from isEarlyAdopter
   isEarlyAdopter         Boolean   @default(true) @map("is_early_adopter")
-  trialEndsAt            DateTime? @default(dbgenerated("(now() + interval '90 days')")) @map("trial_ends_at")
+  trialEndsAt            DateTime? @default(dbgenerated("(now() + interval '30 days')")) @map("trial_ends_at")
   subscriptionEndsAt     DateTime? @map("subscription_ends_at")
   nextBillingDate        DateTime? @map("next_billing_date") // preserved; currently never written by any code path (Razorpay doesn't push it), kept for the display field to keep working
   razorpayCustomerId     String?   @map("razorpay_customer_id")
   razorpaySubscriptionId String?  @unique @map("razorpay_subscription_id")
   razorpayPlanId         String?   @map("razorpay_plan_id")
+  // The price actually locked in when this baker's subscription was
+  // created (₹149 for the first 149 paid subscriptions ever, ₹199 after -
+  // see paid_subscription_counter sequence). Stored once at creation time
+  // rather than recomputed later: a UPI AutoPay mandate's amount is fixed
+  // at creation and can't be silently changed, so whatever price was
+  // locked in here is what this baker actually continues paying,
+  // including after a cancel + re-subscribe (which re-evaluates the
+  // threshold fresh, not this stored value - see billing.service.ts).
+  lockedMonthlyPrice     Decimal?  @db.Decimal(10, 2) @map("locked_monthly_price")
 
   // Account lifecycle (distinct from subscription/billing state)
   // CHECK: PENDING_ONBOARDING | ACTIVE | SUSPENDED

@@ -13,6 +13,7 @@ const razorpayWebhookPayloadSchema = z.object({
       .object({
         entity: z.object({
           id: z.string(),
+          customer_id: z.string().optional(),
         }),
       })
       .optional(),
@@ -65,6 +66,7 @@ export class RazorpayWebhookProcessor implements WebhookProcessor {
       eventId: '',
       eventType: data.event,
       subscriptionId: subscriptionEntity.id,
+      customerId: subscriptionEntity.customer_id,
       paymentId: paymentEntity?.id,
       amount: paymentEntity?.amount, // in paise
       currency: paymentEntity?.currency ?? 'INR',
