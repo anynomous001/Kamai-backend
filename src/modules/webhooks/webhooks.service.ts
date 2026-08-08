@@ -7,7 +7,7 @@ export async function processWebhookEvent(event: {
   eventId: string;
   eventType: string;
   subscriptionId: string;
-  customerId?: string;
+  customerId?: string | null;
   paymentId?: string;
   amount?: number;
   currency?: string;
