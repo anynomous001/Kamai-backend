@@ -7,6 +7,9 @@ export const GetBillingStatusResponseSchema = z.object({
   trialEndDate: z.string().nullable(),
   nextBillingDate: z.string().nullable(),
   autoRenew: z.boolean(),
+  lockedMonthlyPrice: z.number().nullable(),
+  currentOfferPrice: z.number(),
+  spotsRemaining: z.number().int(),
 });
 
 export const CreateSubscriptionBodySchema = z.object({
@@ -34,6 +37,9 @@ export const getBillingStatusJsonSchema = {
             trialEndDate: { type: 'string', nullable: true },
             nextBillingDate: { type: 'string', nullable: true },
             autoRenew: { type: 'boolean' },
+            lockedMonthlyPrice: { type: 'number', nullable: true },
+            currentOfferPrice: { type: 'number' },
+            spotsRemaining: { type: 'integer' },
           },
         },
       },
@@ -64,6 +70,8 @@ export const createSubscriptionJsonSchema = {
             subscriptionId: { type: 'string' },
             keyId: { type: 'string' },
             checkoutUrl: { type: 'string', nullable: true },
+            plan: { type: 'string', enum: ['EARLY_ADOPTER', 'STANDARD'] },
+            monthlyPrice: { type: 'number' },
           },
         },
       },

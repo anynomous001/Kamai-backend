@@ -13,6 +13,12 @@ const razorpayWebhookPayloadSchema = z.object({
       .object({
         entity: z.object({
           id: z.string(),
+          // Razorpay sends this as explicit JSON null (not just omitted)
+          // when no customer entity is attached to the subscription -
+          // .optional() alone only accepts undefined, not null, so it was
+          // rejecting every real payload outright. Confirmed against a
+          // real subscription.charged/activated/cancelled payload.
+          customer_id: z.string().nullable().optional(),
         }),
       })
       .optional(),
@@ -65,6 +71,7 @@ export class RazorpayWebhookProcessor implements WebhookProcessor {
       eventId: '',
       eventType: data.event,
       subscriptionId: subscriptionEntity.id,
+      customerId: subscriptionEntity.customer_id,
       paymentId: paymentEntity?.id,
       amount: paymentEntity?.amount, // in paise
       currency: paymentEntity?.currency ?? 'INR',

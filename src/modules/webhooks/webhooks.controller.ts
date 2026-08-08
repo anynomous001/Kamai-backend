@@ -62,6 +62,13 @@ export async function razorpayWebhookHandler(
       return reply.code(404).send({ success: false, errorCode: 'SUBSCRIPTION_NOT_FOUND' });
     }
 
+    // This catch previously swallowed every other error with zero logging,
+    // making a bad payload/parse failure (as opposed to a DB error already
+    // logged inside processWebhookEvent) completely invisible.
+    logger.error(
+      { error: error instanceof Error ? error.message : error, payload: payloadString },
+      'Unhandled error in webhook handler',
+    );
     return reply.code(500).send({ success: false, errorCode: 'INTERNAL_SERVER_ERROR' });
   }
 }
