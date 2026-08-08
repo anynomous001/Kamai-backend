@@ -89,14 +89,22 @@ model Baker {
   razorpaySubscriptionId String?  @unique @map("razorpay_subscription_id")
   razorpayPlanId         String?   @map("razorpay_plan_id")
   // The price actually locked in when this baker's subscription was
-  // created (₹149 for the first 149 paid subscriptions ever, ₹199 after -
-  // see paid_subscription_counter sequence). Stored once at creation time
-  // rather than recomputed later: a UPI AutoPay mandate's amount is fixed
-  // at creation and can't be silently changed, so whatever price was
-  // locked in here is what this baker actually continues paying,
-  // including after a cancel + re-subscribe (which re-evaluates the
-  // threshold fresh, not this stored value - see billing.service.ts).
+  // created (₹149 while fewer than 149 bakers currently hold an ACTIVE
+  // ₹149 subscription, ₹199 once that many concurrent ACTIVE ₹149
+  // subscribers already exist - see billing.service.ts). This is a live
+  // concurrent count, not a lifetime tally: a cancellation frees the slot
+  // back up for the next subscriber. Stored once at creation time rather
+  // than recomputed later: a UPI AutoPay mandate's amount is fixed at
+  // creation and can't be silently changed, so whatever price was locked
+  // in here is what this baker actually continues paying, including
+  // after a cancel + re-subscribe (which re-evaluates the threshold
+  // fresh against the count at that moment, not this stored value).
   lockedMonthlyPrice     Decimal?  @db.Decimal(10, 2) @map("locked_monthly_price")
+  // Founder/test accounts: excluded from the ACTIVE-₹149-subscriber count
+  // used for threshold pricing (so internal testing/demo use never
+  // occupies a real early-adopter slot), independent of this account's
+  // own subscriptionStatus/access, which is unaffected by this flag.
+  excludeFromSubscriberCount Boolean @default(false) @map("exclude_from_subscriber_count")
 
   // Account lifecycle (distinct from subscription/billing state)
   // CHECK: PENDING_ONBOARDING | ACTIVE | SUSPENDED
