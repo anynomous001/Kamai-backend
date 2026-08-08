@@ -12,7 +12,7 @@ export interface WebhookProcessor {
     eventId: string;
     eventType: string;
     subscriptionId: string;
-    customerId?: string;
+    customerId?: string | null;
     paymentId?: string;
     amount?: number;
     currency?: string;
