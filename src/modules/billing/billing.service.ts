@@ -7,32 +7,24 @@ import { env } from '../../config/env.js';
 
 import type { CreateSubscriptionBody } from './billing.schemas.js';
 
-// The first EARLY_ADOPTER_THRESHOLD paid subscriptions ever created (i.e.
-// nextval('paid_subscription_counter') <= threshold) are priced at
-// EARLY_ADOPTER_PRICE/month; every subscription created after that is
-// priced at STANDARD_PRICE/month. See migration
-// 20260807000000_update_trial_length_and_pricing for the sequence.
+// Threshold pricing is a live concurrent count, not a lifetime tally:
+// while fewer than EARLY_ADOPTER_THRESHOLD bakers currently hold an
+// ACTIVE EARLY_ADOPTER_PRICE subscription, new subscriptions are priced
+// at EARLY_ADOPTER_PRICE/month; once that many concurrent ACTIVE
+// subscribers already exist, new subscriptions are priced at
+// STANDARD_PRICE/month. A cancellation frees its slot back up for the
+// next subscriber. See migration 20260808140000_concurrent_subscriber_counter.
 const EARLY_ADOPTER_THRESHOLD = 149;
 const EARLY_ADOPTER_PRICE = 149;
 const STANDARD_PRICE = 199;
 
-// Peeks at the sequence's current position WITHOUT consuming a slot, so
-// GET /billing/status can show "what a new subscriber would pay right now"
-// without affecting the threshold. A freshly created sequence reports
-// is_called = false (nothing has consumed it yet), meaning 0 subscriptions
-// have been counted so far.
-async function getPaidSubscriptionCount(): Promise<number> {
-  const rows = await prisma.$queryRaw<{ last_value: bigint; is_called: boolean }[]>`
-    SELECT last_value, is_called FROM paid_subscription_counter
-  `;
-  if (rows.length === 0) return 0;
-  const row = rows[0];
-  if (!row.is_called) return 0;
-  return Number(row.last_value);
-}
+// Arbitrary, fixed key identifying the "decide subscriber-count pricing"
+// critical section for pg_advisory_xact_lock. Any bigint works as long
+// as it's used consistently and isn't reused for an unrelated lock.
+const SUBSCRIBER_COUNT_LOCK_KEY = 72119001;
 
-function priceForCount(countBeforeThisOne: number): { planCode: 'EARLY_ADOPTER' | 'STANDARD'; price: number } {
-  return countBeforeThisOne < EARLY_ADOPTER_THRESHOLD
+function priceForCount(activeEarlyAdopterCount: number): { planCode: 'EARLY_ADOPTER' | 'STANDARD'; price: number } {
+  return activeEarlyAdopterCount < EARLY_ADOPTER_THRESHOLD
     ? { planCode: 'EARLY_ADOPTER', price: EARLY_ADOPTER_PRICE }
     : { planCode: 'STANDARD', price: STANDARD_PRICE };
 }
@@ -61,7 +53,16 @@ export async function getBillingStatus(bakerId: string) {
     trialDaysRemaining = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
   }
 
-  const currentCount = await getPaidSubscriptionCount();
+  // Read-only display value - no lock needed here, unlike the
+  // count+decide step in createSubscription, since nothing is being
+  // reserved based on this read.
+  const currentCount = await prisma.baker.count({
+    where: {
+      subscriptionStatus: 'ACTIVE',
+      lockedMonthlyPrice: EARLY_ADOPTER_PRICE,
+      excludeFromSubscriberCount: false,
+    },
+  });
   const currentOfferPrice = priceForCount(currentCount).price;
 
   return {
@@ -85,8 +86,8 @@ export async function getBillingStatus(bakerId: string) {
 
 // payload is validated by the route schema (plan must be 'EARLY_ADOPTER')
 // but not otherwise used: the actual tier/price is always decided here,
-// server-side, from the current paid-subscriber count - never from the
-// request body.
+// server-side, from the current concurrent-subscriber count - never from
+// the request body.
 export async function createSubscription(bakerId: string, _payload: CreateSubscriptionBody) {
   const baker = await prisma.baker.findUnique({
     where: { id: bakerId },
@@ -101,25 +102,42 @@ export async function createSubscription(bakerId: string, _payload: CreateSubscr
     throw new ConflictError('Subscription already active or pending');
   }
 
-  // Atomically reserve this subscription's position in line. nextval() is
-  // safe under concurrency without an explicit row lock - two bakers
-  // subscribing at nearly the same moment cannot both be handed the same
-  // count, which is what actually prevents both from landing under the
-  // threshold when only one discounted slot remains. This must happen at
-  // creation time (before Razorpay/the webhook), because pricing has to be
-  // decided before the mandate is created - waiting for webhook-confirmed
-  // activation to count would reopen the same race.
+  // Decide the price under an advisory lock, serializing the count+decide
+  // step across concurrent requests so two bakers subscribing at nearly
+  // the same moment can't both read the same "under threshold" count and
+  // both land on the discounted price when only one real slot remains.
   //
-  // Tradeoff (accepted): if this subscription-creation attempt fails after
-  // this point (e.g. the Razorpay API call below fails), the reserved
-  // count is not returned to the pool - sequence values are not
-  // transactional. A slot can be permanently consumed by an abandoned
-  // attempt.
-  const seqRows = await prisma.$queryRaw<{ seq: bigint }[]>`
-    SELECT nextval('paid_subscription_counter') AS seq
-  `;
-  const position = Number(seqRows[0].seq);
-  const { planCode, price } = priceForCount(position - 1);
+  // pg_advisory_xact_lock (transaction-scoped), not the session-scoped
+  // pg_advisory_lock, is required here specifically because DATABASE_URL
+  // runs through PgBouncer in transaction-pooling mode - a session-scoped
+  // lock wouldn't reliably survive PgBouncer handing the underlying
+  // connection to a different client between statements, but a
+  // transaction-scoped lock is released exactly when the transaction
+  // ends, which matches PgBouncer's per-transaction connection lifetime.
+  //
+  // Deliberately counts only ACTIVE subscribers, not PENDING: a PENDING
+  // mandate that's never authorized (baker closes the checkout page,
+  // changes their mind, etc.) must not permanently consume a slot the
+  // way the old sequence-based counter did - confirmed to happen in
+  // practice during production verification. The tradeoff is that a
+  // PENDING mandate doesn't reserve its slot either, so a burst of
+  // near-simultaneous first-time signups could momentarily all land
+  // under the threshold before any of them activate. Accepted: this is a
+  // live concurrent count that self-corrects (unlike a lifetime tally),
+  // and an occasional few-subscriber overshoot right at the threshold
+  // boundary is far less costly than routinely losing real slots to
+  // abandoned checkouts, which is the much more common case.
+  const { planCode, price } = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${SUBSCRIBER_COUNT_LOCK_KEY})`;
+    const activeCount = await tx.baker.count({
+      where: {
+        subscriptionStatus: 'ACTIVE',
+        lockedMonthlyPrice: EARLY_ADOPTER_PRICE,
+        excludeFromSubscriberCount: false,
+      },
+    });
+    return priceForCount(activeCount);
+  });
 
   const planId =
     planCode === 'EARLY_ADOPTER' ? env.RAZORPAY_EARLY_ADOPTER_PLAN_ID : env.RAZORPAY_STANDARD_PLAN_ID;
