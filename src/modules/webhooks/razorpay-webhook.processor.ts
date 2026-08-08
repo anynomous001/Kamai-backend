@@ -13,7 +13,12 @@ const razorpayWebhookPayloadSchema = z.object({
       .object({
         entity: z.object({
           id: z.string(),
-          customer_id: z.string().optional(),
+          // Razorpay sends this as explicit JSON null (not just omitted)
+          // when no customer entity is attached to the subscription -
+          // .optional() alone only accepts undefined, not null, so it was
+          // rejecting every real payload outright. Confirmed against a
+          // real subscription.charged/activated/cancelled payload.
+          customer_id: z.string().nullable().optional(),
         }),
       })
       .optional(),
