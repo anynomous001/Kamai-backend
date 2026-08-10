@@ -16,7 +16,7 @@ import {
 export async function bakerRoutes(app: FastifyInstance) {
   app.put('/upi-settings', {
     schema: UpdateUpiSettingsSchema,
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, app.requireWriteAccess],
     handler: updateUpiSettingsHandler,
   });
 
@@ -28,13 +28,13 @@ export async function bakerRoutes(app: FastifyInstance) {
 
   app.patch('/profile', {
     schema: UpdateBakerProfileSchema,
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, app.requireWriteAccess],
     handler: updateBakerProfileHandler,
   });
 
   app.patch('/menu-slug', {
     schema: UpdateMenuSlugSchema,
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, app.requireWriteAccess],
     handler: updateMenuSlugHandler,
   });
 }

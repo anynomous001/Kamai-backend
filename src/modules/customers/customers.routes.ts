@@ -25,7 +25,7 @@ export async function customersRoutes(app: FastifyInstance) {
 
   app.put('/:customerId', {
     schema: updateCustomerJsonSchema,
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, app.requireWriteAccess],
     handler: updateCustomer,
   });
 }
