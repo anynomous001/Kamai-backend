@@ -12,6 +12,10 @@ declare module 'fastify' {
       req: FastifyRequest,
       reply: FastifyReply,
     ) => Promise<void>;
+    requireWriteAccess: (
+      req: FastifyRequest,
+      reply: FastifyReply,
+    ) => Promise<void>;
   }
 }
 

@@ -10,6 +10,7 @@ import { rateLimitPlugin } from './plugins/rate-limit.js';
 import { swaggerPlugin } from './plugins/swagger.js';
 import { errorHandlerPlugin } from './plugins/error-handler.js';
 import { authenticatePlugin } from './plugins/authenticate.js';
+import { writeAccessPlugin } from './plugins/write-access.js';
 
 // Feature Modules
 import { authRoutes } from './modules/auth/auth.routes.js';
@@ -124,6 +125,7 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   // ── Feature Routes ────────────────────────────────────────
   await app.register(authenticatePlugin);
+  await app.register(writeAccessPlugin);
   await app.register(authRoutes, { prefix: '/api/auth' });
   await app.register(dashboardRoutes, { prefix: '/api/dashboard' });
   await app.register(ordersRoutes, { prefix: '/api/orders' });
