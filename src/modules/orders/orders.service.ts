@@ -449,10 +449,19 @@ export class OrdersService {
         }
       }
 
-      await customersService.upsertCustomer(tx, bakerId, {
-        name: payload.customer.name,
+      await tx.customer.update({
+        where: { id: order.customerId },
+        data: {
+          name: payload.customer.name,
+          phone: payload.customer.phone ?? null,
+          address: payload.customer.address,
+        },
+      });
+
+      await auditService.logEvent('CUSTOMER_UPDATED', order.customerId, {
+        bakerId,
+        customerId: order.customerId,
         phone: payload.customer.phone ?? null,
-        address: payload.customer.address,
       });
 
       const total = payload.payment.totalPrice;
