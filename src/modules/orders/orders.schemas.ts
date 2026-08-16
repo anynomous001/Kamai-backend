@@ -13,7 +13,11 @@ export const CustomFieldSchema = z.object({
 
 export const CreateOrderPayloadSchema = z.object({
   customer: z.object({
-    name: z.string().min(1),
+    // Optional — absent only for a fully anonymous walk-in sale (no name,
+    // no phone). Actual runtime enforcement of "name required unless
+    // fully anonymous" lives in createOrderJsonSchema's if/then below,
+    // per the note there; this stays for type-inference only.
+    name: z.string().min(1).optional(),
     phone: z.string().min(1).nullable().optional(), // nullable — real intake often has no phone
     address: z.string().optional(),
   }),
@@ -57,16 +61,32 @@ export const createOrderJsonSchema = {
     properties: {
       customer: {
         type: 'object',
-        required: ['name'],
+        // AJV's `pattern` keyword only applies when the instance is a
+        // string, so a `null` phone (no-phone-on-file customers) still
+        // passes — matches CreateOrderPayloadSchema's regex, which this
+        // JSON schema is the actual runtime enforcement for (that Zod
+        // schema is never .parse()'d anywhere; it's type-inference only).
         properties: {
-          name: { type: 'string' },
-          // AJV's `pattern` keyword only applies when the instance is a
-          // string, so a `null` phone (no-phone-on-file customers) still
-          // passes — matches CreateOrderPayloadSchema's regex, which this
-          // JSON schema is the actual runtime enforcement for (that Zod
-          // schema is never .parse()'d anywhere; it's type-inference only).
+          // minLength here (not just the `then.required` below) matters:
+          // `required` only checks key presence, so without this a name
+          // of '' would satisfy `required: ['name']` and silently let an
+          // empty-name-but-has-phone payload through.
+          name: { type: 'string', minLength: 1 },
           phone: { type: ['string', 'null'], pattern: '^[6-9]\\d{9}$' },
           address: { type: 'string' },
+        },
+        // Name is unconditionally required EXCEPT for a fully anonymous
+        // walk-in sale (both name and phone absent) - createOrder skips
+        // customer-record creation entirely in that case rather than
+        // minting an unmatchable blank-name/blank-phone Customer row.
+        // Phone-only-no-name stays invalid: if a phone is being captured,
+        // a name must be too.
+        if: {
+          properties: { phone: { type: 'string' } },
+          required: ['phone'],
+        },
+        then: {
+          required: ['name'],
         },
       },
       cake: {
@@ -186,7 +206,7 @@ export const getOrdersJsonSchema = {
                 properties: {
                   orderId: { type: 'string', format: 'uuid' },
                   orderNumber: { type: 'string' },
-                  customerName: { type: 'string' },
+                  customerName: { type: ['string', 'null'] },
                   phone: { type: ['string', 'null'] },
                   deliveryDate: { type: 'string', format: 'date' },
                   status: { type: 'string' },
@@ -246,6 +266,7 @@ export const getOrderJsonSchema = {
             status: { type: 'string' },
             customer: {
               type: 'object',
+              nullable: true, // null for a fully anonymous walk-in sale with no linked customer
               properties: {
                 name: { type: 'string' },
                 phone: { type: ['string', 'null'] },

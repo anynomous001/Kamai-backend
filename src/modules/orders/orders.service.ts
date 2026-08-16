@@ -72,16 +72,26 @@ export class OrdersService {
 
       const deliveryCharge = payload.delivery.type === 'pickup' ? 0 : payload.delivery.charge ?? null;
 
-      const customer = await customersService.upsertCustomer(tx, bakerId, {
-        name: payload.customer.name,
-        phone: payload.customer.phone ?? null,
-        address: payload.customer.address,
-      });
+      // Fully anonymous walk-in sale (no name, no phone) skips customer
+      // creation entirely, rather than minting a blank-name/blank-phone
+      // Customer row that would have no matching key and could never be
+      // found or merged again. createOrderJsonSchema's if/then still
+      // requires a name whenever a phone is provided, so this only ever
+      // fires when both are genuinely absent.
+      const isAnonymous =
+        (payload.customer.name == null || payload.customer.name.trim() === '') && payload.customer.phone == null;
+      const customer = isAnonymous
+        ? null
+        : await customersService.upsertCustomer(tx, bakerId, {
+            name: payload.customer.name!,
+            phone: payload.customer.phone ?? null,
+            address: payload.customer.address,
+          });
 
       const newOrder = await tx.order.create({
         data: {
           bakerId,
-          customerId: customer.id,
+          customerId: customer?.id ?? null,
           cakeCategory: payload.cake.category,
           cakeFlavour: payload.cake.flavour,
           weightInPounds: payload.cake.weightInPounds,
@@ -127,7 +137,7 @@ export class OrdersService {
       return {
         orderId: newOrder.id,
         orderNumber: newOrder.displayId,
-        customerName: newOrder.customer.name,
+        customerName: newOrder.customer?.name ?? null,
         deliveryDate: newOrder.deliveryDate.toISOString().slice(0, 10),
         totalPrice: Number(newOrder.totalPrice),
         advancePaid: Number(newOrder.advancePaid),
@@ -208,8 +218,8 @@ export class OrdersService {
       orders: orders.map((o) => ({
         orderId: o.id,
         orderNumber: o.displayId,
-        customerName: o.customer.name,
-        phone: o.customer.phone,
+        customerName: o.customer?.name ?? null,
+        phone: o.customer?.phone ?? null,
         deliveryDate: o.deliveryDate.toISOString().slice(0, 10),
         status: o.orderStatus,
         totalPrice: Number(o.totalPrice),
@@ -250,11 +260,16 @@ export class OrdersService {
       id: order.id,
       orderId: order.displayId,
       status: order.orderStatus,
-      customer: {
-        name: order.customer.name,
-        phone: order.customer.phone,
-        address: order.customer.address,
-      },
+      // null when this is a fully anonymous walk-in sale with no linked
+      // customer record at all - distinct from a linked customer that
+      // simply has blank optional fields.
+      customer: order.customer
+        ? {
+            name: order.customer.name,
+            phone: order.customer.phone,
+            address: order.customer.address,
+          }
+        : null,
       cake: {
         category: order.cakeCategory,
         flavour: order.cakeFlavour,
@@ -439,21 +454,83 @@ export class OrdersService {
         throw new ConflictError(`Cannot edit an order in ${order.orderStatus} state.`);
       }
 
-      if (payload.customer.phone && order.customer.phone !== payload.customer.phone) {
-        const existingCustomer = await tx.customer.findUnique({
-          where: { bakerId_phone: { bakerId, phone: payload.customer.phone } },
-        });
+      let resolvedCustomerId: string;
+      // Deferred until after the order itself is reassigned below - the
+      // orphaned customer must not be deleted while this order still
+      // points at it, since Order.customer is onDelete: Cascade and would
+      // take the order down with it.
+      let pendingOrphanMerge: { orphanedCustomerId: string; mergedIntoCustomerId: string } | null = null;
 
-        if (existingCustomer) {
-          throw new ConflictError('Customer with this phone number already exists.');
+      if (!order.customer) {
+        // Branch (a): this order was fully anonymous (no linked customer
+        // at all). UpdateOrderBodySchema still requires a name on every
+        // edit, so if we're here the baker just supplied identifying info
+        // for the first time. Reuse the exact same find-or-create-by-phone
+        // logic createOrder uses - if the phone matches an existing
+        // customer, attach to that one instead of minting a duplicate.
+        const customer = await customersService.upsertCustomer(tx, bakerId, {
+          name: payload.customer.name,
+          phone: payload.customer.phone ?? null,
+          address: payload.customer.address,
+        });
+        resolvedCustomerId = customer.id;
+      } else {
+        // Filling in a previously-missing phone (order's own customer has
+        // no phone on file yet) is treated differently from changing an
+        // already-set phone: the former can legitimately turn out to
+        // match an existing customer who IS this same real person under a
+        // different blank-phone record, and should merge rather than
+        // block. The latter (an already-set phone being reassigned to
+        // someone else's number) stays blocked exactly as before - that's
+        // much more likely a genuine mistake than a correction.
+        const isFillingInPreviouslyMissingPhone =
+          order.customer.phone === null && payload.customer.phone != null;
+
+        let existingCustomer: { id: string } | null = null;
+        if (payload.customer.phone != null && order.customer.phone !== payload.customer.phone) {
+          existingCustomer = await tx.customer.findUnique({
+            where: { bakerId_phone: { bakerId, phone: payload.customer.phone } },
+            select: { id: true },
+          });
+        }
+
+        if (existingCustomer && existingCustomer.id !== order.customerId) {
+          if (!isFillingInPreviouslyMissingPhone) {
+            throw new ConflictError('Customer with this phone number already exists.');
+          }
+
+          // Branch (b): auto-merge. Reassign this order onto the existing
+          // customer rather than blocking. Deliberately does NOT overwrite
+          // the existing customer's own name/phone/address - only this
+          // order's linkage changes, so a locally-edited name on this one
+          // order can't silently regress a more complete/correct name
+          // already established on the canonical record. Cleanup of the
+          // now-possibly-orphaned original customer is deferred until
+          // after this order's own customerId has actually been
+          // reassigned further down (see pendingOrphanMerge above).
+          resolvedCustomerId = existingCustomer.id;
+          pendingOrphanMerge = { orphanedCustomerId: order.customerId!, mergedIntoCustomerId: existingCustomer.id };
+        } else {
+          // No conflict - phone unchanged, a free number, or the first
+          // phone ever recorded with no existing match. Update this
+          // order's own linked customer in place, exactly as before.
+          await tx.customer.update({
+            where: { id: order.customerId! },
+            data: {
+              name: payload.customer.name,
+              phone: payload.customer.phone ?? null,
+              address: payload.customer.address,
+            },
+          });
+          resolvedCustomerId = order.customerId!;
+
+          await auditService.logEvent('CUSTOMER_UPDATED', resolvedCustomerId, {
+            bakerId,
+            customerId: resolvedCustomerId,
+            phone: payload.customer.phone ?? null,
+          });
         }
       }
-
-      await customersService.upsertCustomer(tx, bakerId, {
-        name: payload.customer.name,
-        phone: payload.customer.phone ?? null,
-        address: payload.customer.address,
-      });
 
       const total = payload.payment.totalPrice;
       const advance = payload.payment.advancePaid;
@@ -471,6 +548,7 @@ export class OrdersService {
       const updatedOrder = await tx.order.update({
         where: { id: order.id },
         data: {
+          customerId: resolvedCustomerId,
           cakeCategory: payload.cake.category,
           cakeFlavour: payload.cake.flavour,
           weightInPounds: payload.cake.weightInPounds,
@@ -495,6 +573,31 @@ export class OrdersService {
         include: { customer: true },
       });
 
+      // Now safe to check and clean up the orphaned customer - this order
+      // has genuinely been reassigned away from it above, so a delete
+      // here can no longer cascade into deleting the order we just saved.
+      if (pendingOrphanMerge) {
+        const { orphanedCustomerId, mergedIntoCustomerId } = pendingOrphanMerge;
+        // Same lock -> re-verify -> delete -> audit-log pattern as the
+        // earlier phantom repair. Lock first: another concurrent edit
+        // could be reassigning a *different* order off this same
+        // soon-to-be-orphaned customer at the same time.
+        await tx.$queryRaw`SELECT id FROM customers WHERE id = ${orphanedCustomerId} FOR UPDATE`;
+        const remainingOrders = await tx.order.count({ where: { customerId: orphanedCustomerId } });
+        const orphanDeleted = remainingOrders === 0;
+        if (orphanDeleted) {
+          await tx.customer.delete({ where: { id: orphanedCustomerId } });
+        }
+
+        await auditService.logEvent('CUSTOMER_AUTO_MERGED_ON_EDIT', mergedIntoCustomerId, {
+          bakerId,
+          orderId: order.id,
+          mergedFromCustomerId: orphanedCustomerId,
+          mergedIntoCustomerId,
+          orphanDeleted,
+        });
+      }
+
       await auditService.logEvent('ORDER_UPDATED', updatedOrder.id, {
         bakerId,
         orderNumber,
@@ -506,7 +609,7 @@ export class OrdersService {
       return {
         orderId: updatedOrder.id,
         orderNumber: updatedOrder.displayId,
-        customerName: updatedOrder.customer.name,
+        customerName: updatedOrder.customer?.name ?? null,
         deliveryDate: updatedOrder.deliveryDate.toISOString().slice(0, 10),
         totalPrice: Number(updatedOrder.totalPrice),
         advancePaid: Number(updatedOrder.advancePaid),

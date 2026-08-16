@@ -20,6 +20,7 @@ export type ErrorCode =
   | 'SERVICE_UNAVAILABLE'
   | 'STORAGE_VERIFICATION_FAILED'
   | 'SUPPORT_NOT_CONFIGURED'
+  | 'SUBSCRIPTION_REQUIRED'
   // Auth
   | 'INVALID_CREDENTIALS'
   | 'OTP_EXPIRED'
@@ -102,6 +103,20 @@ export class ForbiddenError extends AppError {
 export class WhatsAppReceiptDisabledError extends AppError {
   constructor(message = 'WhatsApp receipts are disabled for this baker profile', details?: AppErrorDetails) {
     super(message, 403, 'WHATSAPP_RECEIPT_DISABLED', details);
+  }
+}
+
+// ── 402 Payment Required ────────────────────────────────────
+// Thrown by requireWriteAccess (src/plugins/write-access.ts) for a
+// trial-expired, unsubscribed baker attempting a write. Reads stay
+// allowed (see billing.service.ts's isPaywalled definition, mirrored
+// here) - this only blocks mutations.
+export class PaymentRequiredError extends AppError {
+  constructor(
+    message = 'Your free trial has ended. Subscribe to keep making changes.',
+    details?: AppErrorDetails,
+  ) {
+    super(message, 402, 'SUBSCRIPTION_REQUIRED', details);
   }
 }
 

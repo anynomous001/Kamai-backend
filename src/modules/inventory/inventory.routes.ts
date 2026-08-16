@@ -20,7 +20,7 @@ import {
 export async function inventoryRoutes(app: FastifyInstance) {
   app.post('/', {
     schema: createInventoryItemJsonSchema,
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, app.requireWriteAccess],
     handler: createInventoryItem,
   });
 
@@ -32,13 +32,13 @@ export async function inventoryRoutes(app: FastifyInstance) {
 
   app.put('/:itemId', {
     schema: updateInventoryItemJsonSchema,
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, app.requireWriteAccess],
     handler: updateInventoryItem,
   });
 
   app.delete('/:itemId', {
     schema: deleteInventoryItemJsonSchema,
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, app.requireWriteAccess],
     handler: deleteInventoryItem,
   });
 }

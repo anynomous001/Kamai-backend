@@ -189,8 +189,11 @@ model Order {
   bakerId String @map("baker_id")
   baker   Baker  @relation(fields: [bakerId], references: [id], onDelete: Cascade)
 
-  customerId String   @map("customer_id")
-  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  // Nullable: a fully anonymous walk-in sale (no name, no phone captured)
+  // has no customer record at all, rather than a blank-name/blank-phone
+  // Customer row that could never be matched or merged against anything.
+  customerId String?   @map("customer_id")
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   cakeCategory  String @map("cake_category")
   cakeFlavour   String @map("cake_flavour")

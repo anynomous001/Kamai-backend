@@ -25,7 +25,7 @@ export async function generateWhatsAppMessage(
     throw new NotFoundError('Order not found');
   }
 
-  if (!order.customer.phone) {
+  if (!order.customer || !order.customer.phone) {
     throw new BadRequestError('Customer phone number is required.');
   }
 

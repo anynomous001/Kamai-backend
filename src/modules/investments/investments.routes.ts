@@ -18,7 +18,7 @@ import {
 export async function investmentsRoutes(app: FastifyInstance) {
   app.post('/', {
     schema: createInvestmentJsonSchema,
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, app.requireWriteAccess],
     handler: createInvestmentHandler,
   });
 
@@ -30,7 +30,7 @@ export async function investmentsRoutes(app: FastifyInstance) {
 
   app.delete('/:entryId', {
     schema: deleteInvestmentJsonSchema,
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, app.requireWriteAccess],
     handler: deleteInvestmentHandler,
   });
 }
