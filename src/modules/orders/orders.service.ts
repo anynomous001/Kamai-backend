@@ -78,7 +78,8 @@ export class OrdersService {
       // found or merged again. createOrderJsonSchema's if/then still
       // requires a name whenever a phone is provided, so this only ever
       // fires when both are genuinely absent.
-      const isAnonymous = !payload.customer.name?.trim() && !payload.customer.phone;
+      const isAnonymous =
+        (payload.customer.name == null || payload.customer.name.trim() === '') && payload.customer.phone == null;
       const customer = isAnonymous
         ? null
         : await customersService.upsertCustomer(tx, bakerId, {
@@ -482,10 +483,11 @@ export class OrdersService {
         // block. The latter (an already-set phone being reassigned to
         // someone else's number) stays blocked exactly as before - that's
         // much more likely a genuine mistake than a correction.
-        const isFillingInPreviouslyMissingPhone = order.customer.phone === null && !!payload.customer.phone;
+        const isFillingInPreviouslyMissingPhone =
+          order.customer.phone === null && payload.customer.phone != null;
 
         let existingCustomer: { id: string } | null = null;
-        if (payload.customer.phone && order.customer.phone !== payload.customer.phone) {
+        if (payload.customer.phone != null && order.customer.phone !== payload.customer.phone) {
           existingCustomer = await tx.customer.findUnique({
             where: { bakerId_phone: { bakerId, phone: payload.customer.phone } },
             select: { id: true },
