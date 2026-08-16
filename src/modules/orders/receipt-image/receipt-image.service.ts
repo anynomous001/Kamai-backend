@@ -80,7 +80,7 @@ export async function generateReceiptImage(bakerId: string, orderNumber: string)
     businessName: order.baker.businessName ?? 'Your Baker',
     logoDataUri,
     orderNumber: order.displayId,
-    customerName: order.customer.name,
+    customerName: order.customer?.name ?? 'Walk-in customer',
     itemName: `${order.cakeFlavour} ${order.cakeCategory}`,
     itemMeta: buildItemMeta(order.weightInPounds, order.quantity),
     deliveryLabel: order.deliveryType === 'pickup' ? 'Pickup on' : 'Delivery on',
