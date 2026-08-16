@@ -39,7 +39,7 @@ import { generateReceiptImageJsonSchema } from './receipt-image/receipt-image.sc
 export async function ordersRoutes(app: FastifyInstance) {
   app.post('/', {
     schema: createOrderJsonSchema,
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, app.requireWriteAccess],
     handler: createOrder,
   });
 
@@ -57,31 +57,31 @@ export async function ordersRoutes(app: FastifyInstance) {
 
   app.patch('/:orderNumber/status', {
     schema: updateOrderStatusJsonSchema,
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, app.requireWriteAccess],
     handler: updateOrderStatus,
   });
 
   app.patch('/:orderNumber/payment', {
     schema: recordPaymentJsonSchema,
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, app.requireWriteAccess],
     handler: recordPayment,
   });
 
   app.post('/:orderNumber/receipt-image', {
     schema: generateReceiptImageJsonSchema,
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, app.requireWriteAccess],
     handler: generateReceiptImageHandler,
   });
 
   app.put('/:orderNumber', {
     schema: updateOrderJsonSchema,
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, app.requireWriteAccess],
     handler: updateOrder,
   });
 
   app.delete('/:orderNumber', {
     schema: cancelOrderJsonSchema,
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, app.requireWriteAccess],
     handler: cancelOrder,
   });
 }

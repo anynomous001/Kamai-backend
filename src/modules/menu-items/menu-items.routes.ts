@@ -24,7 +24,7 @@ import {
 export async function menuItemsRoutes(app: FastifyInstance) {
   app.post('/', {
     schema: createMenuItemJsonSchema,
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, app.requireWriteAccess],
     handler: createMenuItemHandler,
   });
 
@@ -39,19 +39,19 @@ export async function menuItemsRoutes(app: FastifyInstance) {
   // ones regardless of order.
   app.put('/reorder', {
     schema: reorderMenuItemsJsonSchema,
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, app.requireWriteAccess],
     handler: reorderMenuItemsHandler,
   });
 
   app.put('/:id', {
     schema: updateMenuItemJsonSchema,
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, app.requireWriteAccess],
     handler: updateMenuItemHandler,
   });
 
   app.delete('/:id', {
     schema: deleteMenuItemJsonSchema,
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, app.requireWriteAccess],
     handler: deleteMenuItemHandler,
   });
 }

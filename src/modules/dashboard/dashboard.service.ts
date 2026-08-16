@@ -172,7 +172,7 @@ export async function getDashboardSummary(bakerId: string): Promise<DashboardSum
       orders: upcomingOrdersRaw.map((order) => ({
         id: order.id,
         orderNumber: order.displayId,
-        customerName: order.customer.name,
+        customerName: order.customer?.name ?? 'Walk-in customer',
         cakeCategory: order.cakeCategory,
         deliveryDate: order.deliveryDate,
         deliveryTime: order.deliveryTime ? order.deliveryTime.toISOString().slice(11, 16) : null,

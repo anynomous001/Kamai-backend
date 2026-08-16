@@ -6,7 +6,7 @@ import { GenerateWhatsAppLinkSchema } from './notifications.schemas.js';
 export async function notificationsRoutes(app: FastifyInstance) {
   app.post('/whatsapp', {
     schema: GenerateWhatsAppLinkSchema,
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, app.requireWriteAccess],
     handler: generateWhatsAppLinkHandler,
   });
 }
