@@ -86,3 +86,37 @@ export const createSubscriptionJsonSchema = {
     },
   },
 };
+
+export const cancelSubscriptionJsonSchema = {
+  description:
+    'Cancel the baker\'s Razorpay subscription at the end of the current billing cycle. ' +
+    'Only triggers the cancellation at Razorpay - subscriptionStatus is updated later by the ' +
+    'subscription.cancelled webhook, not by this endpoint.',
+  tags: ['Billing'],
+  security: [{ cookieAuth: [] }],
+  response: {
+    200: {
+      description: 'Cancellation requested successfully',
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', default: true },
+        data: {
+          type: 'object',
+          properties: {
+            subscriptionId: { type: 'string' },
+            cancelAtCycleEnd: { type: 'boolean' },
+            razorpayStatus: { type: 'string' },
+          },
+        },
+      },
+    },
+    409: {
+      description: 'No active subscription to cancel',
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', default: false },
+        error: { type: 'string' },
+      },
+    },
+  },
+};

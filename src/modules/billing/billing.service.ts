@@ -176,3 +176,46 @@ export async function createSubscription(bakerId: string, _payload: CreateSubscr
     monthlyPrice: price,
   };
 }
+
+// This endpoint only triggers the cancellation at Razorpay; it deliberately
+// never writes subscriptionStatus itself. The subscription.cancelled webhook
+// (webhooks.service.ts) is the sole source of truth for that transition, the
+// same way subscription.activated is the only thing that ever sets ACTIVE.
+// razorpayCustomerId/SubscriptionId/PlanId are never cleared here either -
+// they're preserved as historical linkage even after cancellation.
+export async function cancelSubscription(bakerId: string) {
+  const baker = await prisma.baker.findUnique({
+    where: { id: bakerId },
+    select: { subscriptionStatus: true, razorpaySubscriptionId: true },
+  });
+
+  if (!baker) {
+    throw new NotFoundError('Baker not found');
+  }
+
+  if (
+    baker.razorpaySubscriptionId == null ||
+    baker.subscriptionStatus === 'CANCELLED' ||
+    baker.subscriptionStatus === 'EXPIRED'
+  ) {
+    throw new ConflictError('No active subscription to cancel');
+  }
+
+  // Cancel at the end of the current billing cycle rather than immediately:
+  // the baker already paid for this cycle, so Razorpay keeps the mandate
+  // live (and the webhook status ACTIVE) until the cycle actually ends,
+  // then sends subscription.cancelled.
+  const result = await razorpayGateway.cancelSubscription(baker.razorpaySubscriptionId, true);
+
+  await auditService.logEvent('SUBSCRIPTION_CANCEL_REQUESTED', bakerId, {
+    razorpaySubscriptionId: baker.razorpaySubscriptionId,
+    cancelAtCycleEnd: true,
+    razorpayStatus: result.status,
+  });
+
+  return {
+    subscriptionId: result.subscriptionId,
+    cancelAtCycleEnd: true,
+    razorpayStatus: result.status,
+  };
+}
