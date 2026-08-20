@@ -81,7 +81,14 @@ export const createSubscriptionJsonSchema = {
       type: 'object',
       properties: {
         success: { type: 'boolean', default: false },
-        error: { type: 'string' },
+        // Matches error-handler.ts's actual AppError response shape
+        // (message + errorCode, not "error") - a response schema that
+        // doesn't declare a field silently strips it via ajv's response
+        // serializer. Identical bug to the one fixed on
+        // cancelSubscriptionJsonSchema's 409 below (commit e48cce4);
+        // this was the twin case flagged then and deferred to here.
+        message: { type: 'string' },
+        errorCode: { type: 'string' },
       },
     },
   },
