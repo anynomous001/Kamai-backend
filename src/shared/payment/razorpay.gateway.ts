@@ -45,6 +45,29 @@ export class RazorpayGateway implements PaymentGateway {
       throw new InternalServerError(`Failed to create Razorpay subscription: ${msg}`);
     }
   }
+
+  // Razorpay's SDK exposes `cancel(subscriptionId, cancelAtCycleEnd)`, which
+  // posts `{ cancel_at_cycle_end: 1 }` when true — the subscription keeps
+  // billing through the current cycle and Razorpay sends the
+  // `subscription.cancelled` webhook once it actually ends, instead of
+  // cutting the baker off mid-cycle they already paid for.
+  async cancelSubscription(
+    subscriptionId: string,
+    cancelAtCycleEnd: boolean
+  ): Promise<{ subscriptionId: string; status: string }> {
+    try {
+      const client = this.getClient();
+      const subscription = await client.subscriptions.cancel(subscriptionId, cancelAtCycleEnd);
+
+      return {
+        subscriptionId: subscription.id,
+        status: subscription.status,
+      };
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : 'Unknown error';
+      throw new InternalServerError(`Failed to cancel Razorpay subscription: ${msg}`);
+    }
+  }
 }
 
 export const razorpayGateway = new RazorpayGateway();

@@ -63,19 +63,42 @@ export async function processWebhookEvent(event: {
         },
       });
 
-      // 4. Insert Billing History
-      await tx.billingHistory.create({
-        data: {
-          bakerId: baker.id,
-          subscriptionId,
-          paymentId,
-          eventType,
-          amount: amount ?? 0,
-          currency: currency ?? 'INR',
-          status: 'SUCCESS',
-          processedAt: new Date(),
-        },
-      });
+      // 4. Insert Billing History - deduplicated on subscriptionId +
+      // paymentId + eventType. The eventId-level idempotency check above
+      // only catches the exact same webhook delivery being replayed; it
+      // does not catch Razorpay sending two different event IDs for what
+      // is functionally the same charge (confirmed in production: two
+      // subscription.activated webhooks, same subscriptionId + paymentId,
+      // ~4 seconds apart, each with a distinct eventId, both logged as
+      // separate BillingHistory rows). A genuinely new billing cycle
+      // reuses the same subscriptionId but always carries a new paymentId
+      // from Razorpay, so this key never collides across real charges -
+      // only across duplicate deliveries of the same one.
+      const isDuplicateBillingEvent =
+        paymentId != null &&
+        (await tx.billingHistory.findFirst({
+          where: { subscriptionId, paymentId, eventType },
+          select: { id: true },
+        })) != null;
+
+      if (isDuplicateBillingEvent) {
+        logger.info(
+          `Skipped duplicate BillingHistory write for subscription ${subscriptionId}, payment ${paymentId}, event ${eventType} (eventId ${eventId})`,
+        );
+      } else {
+        await tx.billingHistory.create({
+          data: {
+            bakerId: baker.id,
+            subscriptionId,
+            paymentId,
+            eventType,
+            amount: amount ?? 0,
+            currency: currency ?? 'INR',
+            status: 'SUCCESS',
+            processedAt: new Date(),
+          },
+        });
+      }
 
       // 5. Insert Webhook Event
       await tx.webhookEvent.create({
