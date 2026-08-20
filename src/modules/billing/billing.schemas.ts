@@ -115,7 +115,15 @@ export const cancelSubscriptionJsonSchema = {
       type: 'object',
       properties: {
         success: { type: 'boolean', default: false },
-        error: { type: 'string' },
+        // Matches error-handler.ts's actual AppError response shape
+        // (message + errorCode, not "error") - a response schema that
+        // doesn't declare a field silently strips it via ajv's response
+        // serializer, which is what was actually happening here before
+        // this matched the real shape (confirmed live: the endpoint
+        // returned a bare {"success":false} with the real message and
+        // errorCode both dropped).
+        message: { type: 'string' },
+        errorCode: { type: 'string' },
       },
     },
   },
