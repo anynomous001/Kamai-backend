@@ -106,6 +106,15 @@ model Baker {
   // own subscriptionStatus/access, which is unaffected by this flag.
   excludeFromSubscriberCount Boolean @default(false) @map("exclude_from_subscriber_count")
 
+  // Founder/internal accounts that must always have full write access,
+  // independent of subscriptionStatus or trialEndsAt - see write-access.ts.
+  // Deliberately NOT exposed on any API request body or update path
+  // (profile update, UPI settings, etc.) - this is only ever set directly
+  // against the DB, never client-controllable. Distinct from
+  // excludeFromSubscriberCount above (that one only affects the
+  // threshold-pricing count, not this baker's own access).
+  isFounderAccount Boolean @default(false) @map("is_founder_account")
+
   // Account lifecycle (distinct from subscription/billing state)
   // CHECK: PENDING_ONBOARDING | ACTIVE | SUSPENDED
   // Read by auth.service.ts to block login for suspended accounts —
