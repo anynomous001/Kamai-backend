@@ -24,6 +24,14 @@ export const UpcomingOrderDtoSchema = z.object({
   balanceDue: z.number(),
 });
 
+export const MonthlyFinancialsDtoSchema = z.object({
+  deliveredThisMonth: z.number().int(),
+  amountSoldThisMonth: z.number(),
+  expectedToBeSoldThisMonth: z.number(),
+  dueThisMonth: z.number(),
+  advanceCollectedThisMonth: z.number(),
+});
+
 export const DashboardSummaryResponseSchema = z.object({
   success: z.boolean(),
   data: z.object({
@@ -36,6 +44,7 @@ export const DashboardSummaryResponseSchema = z.object({
       month: z.string().nullable(),
       orders: z.array(UpcomingOrderDtoSchema),
     }),
+    monthlyFinancials: MonthlyFinancialsDtoSchema,
   }),
 });
 
@@ -55,6 +64,19 @@ const orderJsonSchema = {
     balanceDue: { type: 'number', description: 'Amount in rupees' },
     createdAt: { type: 'string', format: 'date-time' },
     updatedAt: { type: 'string', format: 'date-time' },
+  },
+};
+
+const monthlyFinancialsJsonSchema = {
+  type: 'object',
+  description:
+    'Reporting surface, separate from the fast-glance fields above - all figures scoped to the current calendar month by deliveryDate, except advanceCollectedThisMonth which is scoped by when the payment was actually recorded (PaymentEvent.occurredAt).',
+  properties: {
+    deliveredThisMonth: { type: 'integer', example: 18, description: 'Count of Delivered orders with deliveryDate in the current month' },
+    amountSoldThisMonth: { type: 'number', example: 42000, description: 'Sum of totalPrice for those same Delivered-this-month orders' },
+    expectedToBeSoldThisMonth: { type: 'number', example: 68500, description: 'Sum of totalPrice for ALL non-cancelled orders (any status) with deliveryDate this month - total pipeline value' },
+    dueThisMonth: { type: 'number', example: 9200, description: 'Sum of balanceDue (where > 0) across non-cancelled orders with deliveryDate this month' },
+    advanceCollectedThisMonth: { type: 'number', example: 31000, description: 'Sum of PaymentEvent amounts recorded this month (cash actually received), regardless of the linked order\'s deliveryDate' },
   },
 };
 
@@ -109,6 +131,7 @@ export const dashboardSummaryJsonSchema = {
                 },
               },
             },
+            monthlyFinancials: monthlyFinancialsJsonSchema,
           },
         },
       },
