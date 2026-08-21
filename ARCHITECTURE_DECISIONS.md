@@ -122,6 +122,7 @@ Use **Prisma 5.x** as the ORM.
 
 **Date:** 2026-07-25
 **Status:** ✅ Accepted
+
 - Fastify's JSON Schema validation (`ajv`) disabled in favour of Zod
 - All route schemas must be written as both Zod schemas (for runtime) and JSON Schema (for Swagger docs)
 
@@ -242,7 +243,7 @@ Use **Pino** for structured JSON logging with pino-pretty in development.
 
 ## ADR-009 — Authentication migrated from AuthKey SMS OTP to Firebase Phone Authentication
 
-**Date:** 2026-07-25  
+**Date:** 2026-07-25
 **Status:** ✅ Accepted
 
 ### Context
@@ -285,25 +286,25 @@ The new authentication flow is:
 
 ### Backend Responsibilities (Post-Decision)
 
-| Responsibility | Backend |
-|----------------|----------|
-| Generate OTP | ❌ Firebase only |
-| Send SMS | ❌ Firebase only |
-| Verify OTP | ❌ Firebase only |
-| Retry OTP | ❌ Firebase only |
-| Verify Firebase ID Token | ✅ Firebase Admin SDK |
-| Create baker on first login | ✅ Prisma / PostgreSQL |
-| Issue Kamai JWT access token | ✅ JWT (15m) |
-| Issue Kamai refresh token | ✅ JWT (7d) + DB storage |
+| Responsibility                          | Backend                            |
+| --------------------------------------- | ---------------------------------- |
+| Generate OTP                            | ❌ Firebase only                   |
+| Send SMS                                | ❌ Firebase only                   |
+| Verify OTP                              | ❌ Firebase only                   |
+| Retry OTP                               | ❌ Firebase only                   |
+| Verify Firebase ID Token                | ✅ Firebase Admin SDK              |
+| Create baker on first login             | ✅ Prisma / PostgreSQL             |
+| Issue Kamai JWT access token            | ✅ JWT (15m)                       |
+| Issue Kamai refresh token               | ✅ JWT (7d) + DB storage           |
 | Set HttpOnly cookies (access + refresh) | ✅ Fastify Cookie (browser client) |
 
 ### New Environment Variables Required
 
-| Variable | Purpose |
-|----------|---------|
-| `FIREBASE_PROJECT_ID` | Firebase Admin SDK initialisation |
+| Variable                  | Purpose                            |
+| ------------------------- | ---------------------------------- |
+| `FIREBASE_PROJECT_ID`   | Firebase Admin SDK initialisation  |
 | `FIREBASE_CLIENT_EMAIL` | Firebase Admin SDK service account |
-| `FIREBASE_PRIVATE_KEY` | Firebase Admin SDK service account |
+| `FIREBASE_PRIVATE_KEY`  | Firebase Admin SDK service account |
 
 ### Consequences
 
@@ -317,8 +318,8 @@ The new authentication flow is:
 
 ## ADR-008 — Server-side Refresh Token Revocation & Decoupled Session Management
 
-**Date:** 2026-07-26  
-**Status:** ✅ Accepted  
+**Date:** 2026-07-26
+**Status:** ✅ Accepted
 
 ### Context
 
@@ -339,3 +340,344 @@ Session management uses server-side refresh token revocation with HttpOnly cooki
 
 - Backend invalidates Kamai JWT session by updating `revokedAt` timestamp on the active `RefreshToken` DB record
 - Client (Android/PWA) handles Firebase `signOut()` independently
+
+One thing I would improve from the original Firebase version is that **Logout should become completely session-driven**.
+
+Since we're removing Firebase entirely, there is **no concept of Firebase Sign Out** anymore.
+
+Logout should only invalidate the Kamai session and clear the JWT cookie.
+
+Everything else remains exactly the same.
+
+---
+
+# Sequence Diagram 24 — Logout
+
+## Action
+
+> Baker taps **Logout** from the Profile / Settings screen.
+
+---
+
+## API
+
+```http
+POST /api/auth/logout
+```
+
+---
+
+## Payload
+
+```json
+{}
+```
+
+No request body is required. The authenticated session is identified using the secure HTTP-only JWT cookie.
+
+---
+
+# Participants
+
+* Baker
+* Next.js PWA
+* Auth Controller
+* Auth Service
+* PostgreSQL (Supabase)
+* Session Service
+* Audit Logger
+
+---
+
+```mermaid
+sequenceDiagram
+    autonumber
+
+    actor Baker
+
+    participant UI as Next.js PWA
+    participant Controller as Auth Controller
+    participant Auth as Auth Service
+    participant DB as PostgreSQL
+    participant Session as Session Service
+    participant Audit as Audit Logger
+
+    Baker->>UI: Tap Logout
+
+    UI->>Controller: POST /api/auth/logout
+
+    Controller->>Auth: Validate Authenticated Session
+
+    alt Invalid Session
+
+        Auth-->>UI: 401 Unauthorized
+
+        UI-->>Baker: Redirect Login Screen
+
+    else Valid Session
+
+        Auth->>Session: Revoke Session
+
+        Session->>DB: Update Session Status
+
+        DB-->>Session: Success
+
+        Session-->>Auth: Session Revoked
+
+        Auth->>Audit: Log USER_LOGGED_OUT
+
+        Audit-->>Auth: Logged
+
+        Auth-->>UI: Clear JWT Cookie
+
+        UI->>UI: Clear Local Application State
+
+        UI-->>Baker: Redirect Login Screen
+
+    end
+```
+
+---
+
+# Backend Flow
+
+```text
+User
+   │
+   ▼
+POST /api/auth/logout
+   │
+   ▼
+Validate JWT
+   │
+   ▼
+Find Active Session
+   │
+   ▼
+Revoke Session
+   │
+   ▼
+Clear JWT Cookie
+   │
+   ▼
+Audit Log
+   │
+   ▼
+Redirect Login Screen
+```
+
+---
+
+# Database Operations
+
+## Find Active Session
+
+```sql
+SELECT *
+FROM sessions
+WHERE session_id = :sessionId
+AND revoked_at IS NULL;
+```
+
+---
+
+## Revoke Session
+
+```sql
+UPDATE sessions
+SET
+    revoked_at = NOW(),
+    updated_at = NOW()
+WHERE
+    session_id = :sessionId;
+```
+
+---
+
+# Cookie Management
+
+On successful logout, the backend clears the authentication cookies.
+
+```text
+kamai_access_token
+        │
+        ▼
+Clear Cookie
+
+kamai_refresh_token
+        │
+        ▼
+Clear Cookie
+```
+
+Cookie attributes:
+
+```text
+HttpOnly
+Secure
+SameSite=Lax
+Expires=Thu, 01 Jan 1970
+```
+
+This immediately invalidates the browser's authenticated state.
+
+---
+
+# Frontend Cleanup
+
+The frontend performs local cleanup only.
+
+```text
+Clear User Context
+        │
+        ▼
+Clear React State
+        │
+        ▼
+Clear Cached API Data
+        │
+        ▼
+Navigate to Login Screen
+```
+
+> **Note:** The frontend does **not** store or remove JWT tokens directly. Authentication is managed using secure HTTP-only cookies.
+
+---
+
+# Success Response
+
+```json
+{
+    "success": true,
+    "message": "Logged out successfully."
+}
+```
+
+---
+
+# Error Flows
+
+### Session Already Expired
+
+```text
+JWT Validation
+      │
+      ▼
+Session Invalid
+      ▼
+401 Unauthorized
+      ▼
+Redirect Login
+```
+
+---
+
+### Database Failure
+
+```text
+Revoke Session
+       │
+       ▼
+Database Error
+       ▼
+500 Internal Server Error
+       ▼
+Retry Later
+```
+
+---
+
+### Audit Failure
+
+```text
+Logout Successful
+       │
+       ▼
+Audit Logging Failed
+       │
+       ▼
+Log Internally
+       │
+       ▼
+Return Success
+```
+
+> Logout should **not fail** because the audit log could not be written. The session revocation takes precedence.
+
+---
+
+# Security Flow
+
+```text
+JWT Cookie
+     │
+     ▼
+Validate Signature
+     │
+     ▼
+Find Active Session
+     │
+     ▼
+Revoke Session
+     │
+     ▼
+Clear Authentication Cookies
+     │
+     ▼
+Redirect to Login
+```
+
+---
+
+# Business Rules
+
+* Authentication is performed using the existing **HTTP-only JWT cookie**.
+* No request body is required.
+* The current session is revoked by setting `revoked_at`.
+* Both access and refresh token cookies are cleared.
+* The frontend removes only local UI/application state; it never handles JWT values directly.
+* Every successful logout is recorded as `USER_LOGGED_OUT` in the audit log.
+* Logout is **idempotent**. If the session is already invalid, the user is redirected to the login screen without exposing internal session details.
+* This action is **completely independent of Firebase**. There is no Firebase SDK, Firebase Sign Out, or third-party identity provider involved. Kamai owns the full authentication lifecycle through its session and JWT infrastructure.
+
+---
+
+## Difference from the Previous Firebase Architecture
+
+### Previous Flow
+
+```text
+Logout
+    │
+    ▼
+Firebase Sign Out
+    │
+    ▼
+Backend Logout
+    │
+    ▼
+Redirect Login
+```
+
+### New Flow
+
+```text
+Logout
+    │
+    ▼
+POST /api/auth/logout
+    │
+    ▼
+Validate JWT
+    │
+    ▼
+Revoke Session
+    │
+    ▼
+Clear HttpOnly Cookies
+    │
+    ▼
+Redirect Login
+```
+
+The new design is cleaner because the **Kamai backend is now the single source of truth for authentication and session management**. There are no external authentication dependencies, making logout faster, simpler, and easier to maintain.

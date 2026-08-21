@@ -35,25 +35,25 @@
 
 ## ✅ Done
 
-- [x] Project scaffold (package.json, tsconfig, eslint, prettier)
-- [x] Fastify application factory
-- [x] Security plugins (Helmet, CORS, Cookie, Rate Limit)
-- [x] Centralized error handling
-- [x] Typed error class hierarchy (`GoneError` added 2026-07-27)
-- [x] Pino structured logger
-- [x] Prisma ORM setup
-- [x] Zod environment validation
-- [x] Swagger/OpenAPI documentation
-- [x] Health check endpoint
-- [x] Docker + Docker Compose
-- [x] GitHub Actions CI pipeline
-- [x] Vitest test framework
-- [x] `DATABASE_URL` configured (Supabase pooler)
-- [x] `DIRECT_URL` configured (Supabase direct)
-- [x] `JWT_SECRET` / `JWT_REFRESH_SECRET` / `COOKIE_SECRET` generated
-- [x] Prisma schema validated against live Supabase DB
-- [x] **Authentication migrated** — Firebase removed; Email OTP via Resend (2026-07-27)
-- [x] **`RESEND_API_KEY`** configured for email OTP delivery
-- [x] **`EmailVerification` model** added to Prisma schema
-- [x] **Audit logging** — Implemented across all auth flows (resilient non-blocking pattern)
-- [x] **All 24 MVP actions** implemented and tested
+- [X] Project scaffold (package.json, tsconfig, eslint, prettier)
+- [X] Fastify application factory
+- [X] Security plugins (Helmet, CORS, Cookie, Rate Limit)
+- [X] Centralized error handling
+- [X] Typed error class hierarchy (`GoneError` added 2026-07-27)
+- [X] Pino structured logger
+- [X] Prisma ORM setup
+- [X] Zod environment validation
+- [X] Swagger/OpenAPI documentation
+- [X] Health check endpoint
+- [X] Docker + Docker Compose
+- [X] GitHub Actions CI pipeline
+- [X] Vitest test framework
+- [X] `DATABASE_URL` configured (Supabase pooler)
+- [X] `DIRECT_URL` configured (Supabase direct)
+- [X] `JWT_SECRET` / `JWT_REFRESH_SECRET` / `COOKIE_SECRET` generated
+- [X] Prisma schema validated against live Supabase DB
+- [X] **Authentication migrated** — Firebase removed; Email OTP via Resend (2026-07-27)
+- [X] **`RESEND_API_KEY`** configured for email OTP delivery
+- [X] **`EmailVerification` model** added to Prisma schema
+- [X] **Audit logging** — Implemented across all auth flows (resilient non-blocking pattern)
+- [X] **All 24 MVP actions** implemented and tested

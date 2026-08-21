@@ -17,6 +17,11 @@ import { PaymentRequiredError, NotFoundError } from '../shared/errors/index.js';
  * frontend paywall uses (src/app/page.tsx's isPaywalled): status !==
  * ACTIVE AND trialEndsAt has passed. A baker who's ACTIVE, still mid
  * trial, or has no trialEndsAt at all is unaffected.
+ *
+ * isFounderAccount bypasses this check entirely, regardless of
+ * subscriptionStatus or trialEndsAt - it's a DB-only flag (never settable
+ * through any API route, see schema.prisma) for founder/internal accounts
+ * that must always keep full write access.
  */
 export const writeAccessPlugin = fp(
   async (app: FastifyInstance) => {
@@ -28,7 +33,7 @@ export const writeAccessPlugin = fp(
 
         const baker = await prisma.baker.findUnique({
           where: { id: bakerId },
-          select: { subscriptionStatus: true, trialEndsAt: true },
+          select: { subscriptionStatus: true, trialEndsAt: true, isFounderAccount: true },
         });
 
         if (!baker) {
@@ -36,6 +41,7 @@ export const writeAccessPlugin = fp(
         }
 
         const isReadOnly =
+          !baker.isFounderAccount &&
           baker.subscriptionStatus !== 'ACTIVE' &&
           baker.trialEndsAt != null &&
           baker.trialEndsAt.getTime() <= Date.now();

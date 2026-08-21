@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { prisma } from '../src/shared/database/prisma.js';
+import { customersService } from '../src/modules/customers/customers.service.js';
 
 describe('Action 11 E2E: Customer Upsert', () => {
   let app: any;
@@ -77,5 +78,48 @@ describe('Action 11 E2E: Customer Upsert', () => {
     });
     expect(JSON.parse(profile2.body).data.summary.lifetimeValue).toBe(2500);
     expect(JSON.parse(profile2.body).data.summary.totalOrders).toBe(2);
+  });
+
+  // Blank name is unreachable via the HTTP API (createOrderJsonSchema/
+  // UpdateOrderBodySchema both require a non-blank name whenever phone is
+  // present) - this exercises upsertCustomer directly, the way a
+  // direct-script caller (e.g. a bulk historical-order import) would,
+  // which bypasses that request-schema layer entirely.
+  it('retains the existing stored name when upsertCustomer is called directly with a blank name on a phone match', async () => {
+    const phone = '9876500001';
+
+    const created = await prisma.$transaction((tx) =>
+      customersService.upsertCustomer(tx, 'test-baker-id', {
+        name: 'Real Customer Name',
+        phone,
+        address: null,
+      }),
+    );
+    expect(created.name).toBe('Real Customer Name');
+
+    const updatedWithBlankName = await prisma.$transaction((tx) =>
+      customersService.upsertCustomer(tx, 'test-baker-id', {
+        name: '',
+        phone,
+        address: null,
+      }),
+    );
+
+    // Same customer row (matched by phone), name untouched by the blank input.
+    expect(updatedWithBlankName.id).toBe(created.id);
+    expect(updatedWithBlankName.name).toBe('Real Customer Name');
+
+    // A genuinely new, non-blank name still overwrites, exactly as before.
+    const updatedWithRealName = await prisma.$transaction((tx) =>
+      customersService.upsertCustomer(tx, 'test-baker-id', {
+        name: 'Updated Real Name',
+        phone,
+        address: null,
+      }),
+    );
+    expect(updatedWithRealName.id).toBe(created.id);
+    expect(updatedWithRealName.name).toBe('Updated Real Name');
+
+    await prisma.customer.deleteMany({ where: { bakerId: 'test-baker-id', phone } });
   });
 });

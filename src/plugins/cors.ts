@@ -14,7 +14,8 @@ export const corsPlugin = fp(async (app) => {
       const escaped = pattern
         .replace(/[.+^${}()|[\]\\]/g, '\\$&')
         .replace(/\\\*/g, '.*');
-      return new RegExp(`^${escaped}$`);
+
+        return new RegExp(`^${escaped}$`);
     }
     return pattern;
   });
