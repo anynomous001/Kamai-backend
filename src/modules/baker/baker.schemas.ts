@@ -110,6 +110,7 @@ export const GetBakerProfileResponseSchema = z.object({
       trialEndsOn: z.string().nullable(),
       trialDaysRemaining: z.number(),
       nextBillingDate: z.string().nullable(),
+      isFounderAccount: z.boolean(),
     }),
   }),
 });
@@ -271,6 +272,7 @@ export const GetBakerProfileSchema = {
                 trialEndsOn: { type: 'string', nullable: true },
                 trialDaysRemaining: { type: 'number' },
                 nextBillingDate: { type: 'string', nullable: true },
+                isFounderAccount: { type: 'boolean' },
               },
             },
           },

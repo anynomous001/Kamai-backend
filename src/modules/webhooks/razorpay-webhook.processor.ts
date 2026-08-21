@@ -46,7 +46,21 @@ export class RazorpayWebhookProcessor implements WebhookProcessor {
       .update(payload)
       .digest('hex');
 
-    if (expectedSignature !== signature) {
+    // crypto.timingSafeEqual throws on mismatched buffer lengths rather
+    // than returning false, so the length check must come first - that's
+    // safe to do with a plain comparison since a digest's length is
+    // fixed and public, only its CONTENT is secret. This prevents both a
+    // crash on a malformed/wrong-length signature header and a timing
+    // side-channel on the actual content comparison (previously a plain
+    // !== on the two hex strings).
+    const expectedBuffer = Buffer.from(expectedSignature, 'hex');
+    const providedBuffer = Buffer.from(signature, 'hex');
+
+    const isValid =
+      expectedBuffer.length === providedBuffer.length &&
+      crypto.timingSafeEqual(expectedBuffer, providedBuffer);
+
+    if (!isValid) {
       throw new Error('Invalid webhook signature');
     }
   }

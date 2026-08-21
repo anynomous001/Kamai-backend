@@ -54,9 +54,20 @@ export class CustomersService {
       });
 
       if (existingCustomer) {
+        // Retain the existing stored name if the incoming one is blank,
+        // rather than overwriting a real name with an empty string. Not
+        // reachable via the HTTP API today (createOrderJsonSchema/
+        // UpdateOrderBodySchema/UpdateCustomerBody all require a
+        // non-blank name), but a direct-script caller (e.g. a bulk
+        // historical-order import) bypasses that request-schema layer
+        // entirely and calls this function straight - this is real
+        // protection for exactly that case, per the 2026-08-21 audit.
         const updatedCustomer = await tx.customer.update({
           where: { id: existingCustomer.id },
-          data: { name: customerData.name, address: customerData.address },
+          data: {
+            name: customerData.name?.trim() ? customerData.name : existingCustomer.name,
+            address: customerData.address,
+          },
         });
 
         await auditService.logEvent('CUSTOMER_UPDATED', updatedCustomer.id, {

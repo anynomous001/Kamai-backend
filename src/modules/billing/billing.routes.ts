@@ -1,7 +1,15 @@
 import type { FastifyInstance } from 'fastify';
 
-import { getBillingStatusHandler, createSubscriptionHandler } from './billing.controller.js';
-import { getBillingStatusJsonSchema, createSubscriptionJsonSchema } from './billing.schemas.js';
+import {
+  getBillingStatusHandler,
+  createSubscriptionHandler,
+  cancelSubscriptionHandler,
+} from './billing.controller.js';
+import {
+  getBillingStatusJsonSchema,
+  createSubscriptionJsonSchema,
+  cancelSubscriptionJsonSchema,
+} from './billing.schemas.js';
 
 /**
  * Billing & Subscription Routes
@@ -18,5 +26,14 @@ export async function billingRoutes(app: FastifyInstance) {
     schema: createSubscriptionJsonSchema,
     preHandler: [app.authenticate],
     handler: createSubscriptionHandler,
+  });
+
+  // No requireWriteAccess: a trial-expired/read-only baker must still be
+  // able to cancel their subscription. Same reasoning as create-subscription
+  // staying ungated - gating either would create a lockout deadlock.
+  app.post('/cancel-subscription', {
+    schema: cancelSubscriptionJsonSchema,
+    preHandler: [app.authenticate],
+    handler: cancelSubscriptionHandler,
   });
 }

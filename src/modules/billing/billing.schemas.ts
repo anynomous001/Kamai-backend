@@ -10,6 +10,7 @@ export const GetBillingStatusResponseSchema = z.object({
   lockedMonthlyPrice: z.number().nullable(),
   currentOfferPrice: z.number(),
   spotsRemaining: z.number().int(),
+  isFounderAccount: z.boolean(),
 });
 
 export const CreateSubscriptionBodySchema = z.object({
@@ -40,6 +41,7 @@ export const getBillingStatusJsonSchema = {
             lockedMonthlyPrice: { type: 'number', nullable: true },
             currentOfferPrice: { type: 'number' },
             spotsRemaining: { type: 'integer' },
+            isFounderAccount: { type: 'boolean' },
           },
         },
       },
@@ -81,7 +83,56 @@ export const createSubscriptionJsonSchema = {
       type: 'object',
       properties: {
         success: { type: 'boolean', default: false },
-        error: { type: 'string' },
+        // Matches error-handler.ts's actual AppError response shape
+        // (message + errorCode, not "error") - a response schema that
+        // doesn't declare a field silently strips it via ajv's response
+        // serializer. Identical bug to the one fixed on
+        // cancelSubscriptionJsonSchema's 409 below (commit e48cce4);
+        // this was the twin case flagged then and deferred to here.
+        message: { type: 'string' },
+        errorCode: { type: 'string' },
+      },
+    },
+  },
+};
+
+export const cancelSubscriptionJsonSchema = {
+  description:
+    'Cancel the baker\'s Razorpay subscription at the end of the current billing cycle. ' +
+    'Only triggers the cancellation at Razorpay - subscriptionStatus is updated later by the ' +
+    'subscription.cancelled webhook, not by this endpoint.',
+  tags: ['Billing'],
+  security: [{ cookieAuth: [] }],
+  response: {
+    200: {
+      description: 'Cancellation requested successfully',
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', default: true },
+        data: {
+          type: 'object',
+          properties: {
+            subscriptionId: { type: 'string' },
+            cancelAtCycleEnd: { type: 'boolean' },
+            razorpayStatus: { type: 'string' },
+          },
+        },
+      },
+    },
+    409: {
+      description: 'No active subscription to cancel',
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', default: false },
+        // Matches error-handler.ts's actual AppError response shape
+        // (message + errorCode, not "error") - a response schema that
+        // doesn't declare a field silently strips it via ajv's response
+        // serializer, which is what was actually happening here before
+        // this matched the real shape (confirmed live: the endpoint
+        // returned a bare {"success":false} with the real message and
+        // errorCode both dropped).
+        message: { type: 'string' },
+        errorCode: { type: 'string' },
       },
     },
   },
