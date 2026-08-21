@@ -4,6 +4,7 @@ import { cacheService } from '../../shared/cache/index.js';
 import { ConflictError, NotFoundError } from '../../shared/errors/index.js';
 import { razorpayGateway } from '../../shared/payment/razorpay.gateway.js';
 import { logger } from '../../shared/logger/index.js';
+import { getTrialDaysRemaining } from '../../shared/utils/trial.util.js';
 import { env } from '../../config/env.js';
 
 import type { CreateSubscriptionBody } from './billing.schemas.js';
@@ -73,12 +74,7 @@ export async function getBillingStatus(bakerId: string) {
     throw new NotFoundError('Baker not found');
   }
 
-  let trialDaysRemaining = 0;
-  if (baker.trialEndsAt) {
-    const now = new Date();
-    const diffTime = baker.trialEndsAt.getTime() - now.getTime();
-    trialDaysRemaining = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
-  }
+  const trialDaysRemaining = getTrialDaysRemaining(baker.trialEndsAt);
 
   // Read-only display value - no lock needed here, unlike the
   // count+decide step in createSubscription, since nothing is being

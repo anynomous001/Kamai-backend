@@ -1,14 +1,10 @@
 import type { Baker } from '@prisma/client';
 
+import { getTrialDaysRemaining } from '../../shared/utils/trial.util.js';
+
 export class BakerProfileMapper {
   static toProfileResponse(baker: Baker, logoUrl: string | null, fssaiDocumentUrl: string | null) {
-    const now = new Date();
-    let trialDaysRemaining = 0;
-
-    if (baker.trialEndsAt) {
-      const diffTime = baker.trialEndsAt.getTime() - now.getTime();
-      trialDaysRemaining = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
-    }
+    const trialDaysRemaining = getTrialDaysRemaining(baker.trialEndsAt);
 
     return {
       id: baker.id,

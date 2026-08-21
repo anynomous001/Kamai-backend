@@ -7,6 +7,7 @@ import { razorpayWebhookProcessor } from '../src/modules/webhooks/razorpay-webho
 import { processWebhookEvent } from '../src/modules/webhooks/webhooks.service.js';
 import { createSubscription, getBillingStatus } from '../src/modules/billing/billing.service.js';
 import { getBakerProfile } from '../src/modules/baker/baker-profile.service.js';
+import { getTrialDaysRemaining } from '../src/shared/utils/trial.util.js';
 import { env } from '../src/config/env.js';
 
 // All test-created baker/event ids are prefixed so cleanup can find them
@@ -313,6 +314,55 @@ describe('Billing concurrency, webhook retry integrity, signature timing-safety'
     it('includes subscription.isFounderAccount in the response, reflecting the real DB value', async () => {
       const profile = await getBakerProfile(bakerId);
       expect(profile.subscription.isFounderAccount).toBe(true);
+    });
+  });
+
+  describe('Task 1 follow-up: shared getTrialDaysRemaining helper stays consistent across endpoints', () => {
+    const bakerId = `${TEST_PREFIX}trial-days-consistency`;
+
+    beforeAll(async () => {
+      await deleteTestBakers([bakerId]);
+      await prisma.baker.create({
+        data: {
+          id: bakerId,
+          status: 'ACTIVE',
+          subscriptionStatus: 'TRIAL',
+          trialEndsAt: new Date(Date.now() + 17 * 24 * 60 * 60 * 1000 + 12 * 60 * 60 * 1000), // ~17.5 days out
+        },
+      });
+    });
+
+    afterAll(async () => {
+      await deleteTestBakers([bakerId]);
+    });
+
+    it('the shared utility itself is deterministic for a fixed instant', () => {
+      const trialEndsAt = new Date('2026-09-01T00:00:00.000Z');
+      const now = new Date('2026-08-25T00:00:00.000Z'); // exactly 7 days before
+      expect(getTrialDaysRemaining(trialEndsAt, now)).toBe(7);
+      // Past trialEndsAt floors at 0, never negative.
+      expect(getTrialDaysRemaining(trialEndsAt, new Date('2026-09-10T00:00:00.000Z'))).toBe(0);
+      expect(getTrialDaysRemaining(null, now)).toBe(0);
+    });
+
+    it('GET /api/billing/status and GET /api/baker/profile report the exact same trialDaysRemaining for the same baker at the same instant', async () => {
+      // No frozen clock here (this is a real DB integration test, not a
+      // pure unit test - faking global timers risks hanging real
+      // Prisma/network I/O that may rely on real timers internally).
+      // Both service calls independently call `new Date()`, but firing
+      // them concurrently via Promise.all keeps them within the same
+      // millisecond-scale window, which is all that matters at
+      // day-granularity - the deterministic unit test above already
+      // proves the underlying math itself is exact for a fixed instant.
+      const [billingStatus, profile] = await Promise.all([
+        getBillingStatus(bakerId),
+        getBakerProfile(bakerId),
+      ]);
+
+      expect(billingStatus.trialDaysRemaining).toBe(profile.subscription.trialDaysRemaining);
+      // Sanity: not just "both zero" by coincidence - a real, positive
+      // shared value computed from the same trialEndsAt.
+      expect(billingStatus.trialDaysRemaining).toBeGreaterThan(0);
     });
   });
 });
