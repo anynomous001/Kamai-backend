@@ -82,6 +82,12 @@ model Baker {
   subscriptionStatus     String    @default("TRIAL") @map("subscription_status")
   subscriptionPlan       String?   @map("subscription_plan") // CHECK: EARLY_ADOPTER | STANDARD — preserved, distinct from isEarlyAdopter
   isEarlyAdopter         Boolean   @default(true) @map("is_early_adopter")
+  // CHECK (bakers_trial_ends_at_required_check, raw SQL in migration):
+  // subscription_status = 'ACTIVE' OR is_founder_account = true OR
+  // trial_ends_at IS NOT NULL. write-access.ts's paywall only ever
+  // blocks when trialEndsAt is set - this constraint guarantees a
+  // non-ACTIVE, non-founder baker can never end up with a null
+  // trialEndsAt (which would mean permanent, unenforceable free access).
   trialEndsAt            DateTime? @default(dbgenerated("(now() + interval '30 days')")) @map("trial_ends_at")
   subscriptionEndsAt     DateTime? @map("subscription_ends_at")
   nextBillingDate        DateTime? @map("next_billing_date") // preserved; currently never written by any code path (Razorpay doesn't push it), kept for the display field to keep working
