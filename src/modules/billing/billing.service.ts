@@ -49,6 +49,7 @@ export async function getBillingStatus(bakerId: string) {
       nextBillingDate: true,
       razorpaySubscriptionId: true,
       lockedMonthlyPrice: true,
+      isFounderAccount: true,
     },
   });
 
@@ -91,6 +92,13 @@ export async function getBillingStatus(bakerId: string) {
     // What a brand-new subscriber would be offered right now.
     currentOfferPrice,
     spotsRemaining: Math.max(0, EARLY_ADOPTER_THRESHOLD - currentCount),
+    // Surfaced so a founder/comp account is distinguishable from a real
+    // paying subscriber in the API response - previously this field was
+    // never returned, so e.g. subscriptionStatus: 'ACTIVE' with a real-
+    // looking lockedMonthlyPrice could read as a genuine live
+    // subscription with no signal otherwise (flagged in the 2026-08-21
+    // audit).
+    isFounderAccount: baker.isFounderAccount,
   };
 }
 
