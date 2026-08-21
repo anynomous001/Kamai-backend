@@ -54,6 +54,12 @@ export class BakerProfileMapper {
         trialEndsOn: baker.trialEndsAt ? baker.trialEndsAt.toISOString() : null,
         trialDaysRemaining,
         nextBillingDate: baker.nextBillingDate ? baker.nextBillingDate.toISOString() : null,
+        // Mirrors the fix already shipped for getBillingStatus() - lets
+        // the frontend's isPaywalled check short-circuit the same way
+        // write-access.ts does server-side, instead of the two layers
+        // only agreeing by coincidence whenever subscriptionStatus
+        // happens to read ACTIVE (2026-08-21 audit).
+        isFounderAccount: baker.isFounderAccount,
       },
     };
   }

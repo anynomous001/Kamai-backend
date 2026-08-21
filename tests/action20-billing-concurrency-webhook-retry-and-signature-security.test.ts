@@ -6,6 +6,7 @@ import { razorpayGateway } from '../src/shared/payment/razorpay.gateway.js';
 import { razorpayWebhookProcessor } from '../src/modules/webhooks/razorpay-webhook.processor.js';
 import { processWebhookEvent } from '../src/modules/webhooks/webhooks.service.js';
 import { createSubscription, getBillingStatus } from '../src/modules/billing/billing.service.js';
+import { getBakerProfile } from '../src/modules/baker/baker-profile.service.js';
 import { env } from '../src/config/env.js';
 
 // All test-created baker/event ids are prefixed so cleanup can find them
@@ -287,6 +288,31 @@ describe('Billing concurrency, webhook retry integrity, signature timing-safety'
       const baker = await prisma.baker.findUniqueOrThrow({ where: { id: freshBakerId } });
       expect(baker.subscriptionStatus).toBe('PENDING');
       expect(baker.razorpaySubscriptionId).toBe('sub_test20_still_fresh');
+    });
+  });
+
+  describe('Task 2: getBakerProfile exposes isFounderAccount', () => {
+    const bakerId = `${TEST_PREFIX}profile-founder-status`;
+
+    beforeAll(async () => {
+      await deleteTestBakers([bakerId]);
+      await prisma.baker.create({
+        data: {
+          id: bakerId,
+          status: 'ACTIVE',
+          subscriptionStatus: 'ACTIVE',
+          isFounderAccount: true,
+        },
+      });
+    });
+
+    afterAll(async () => {
+      await deleteTestBakers([bakerId]);
+    });
+
+    it('includes subscription.isFounderAccount in the response, reflecting the real DB value', async () => {
+      const profile = await getBakerProfile(bakerId);
+      expect(profile.subscription.isFounderAccount).toBe(true);
     });
   });
 });
