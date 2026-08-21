@@ -25,6 +25,14 @@ export interface DashboardUpcomingOrder {
   balanceDue: number;
 }
 
+export interface DashboardMonthlyFinancials {
+  deliveredThisMonth: number;
+  amountSoldThisMonth: number;
+  expectedToBeSoldThisMonth: number;
+  dueThisMonth: number;
+  advanceCollectedThisMonth: number;
+}
+
 export interface DashboardSummary {
   todayDeliveries: number;
   activeOrders: number;
@@ -41,9 +49,18 @@ export interface DashboardSummary {
     month: string | null;
     orders: DashboardUpcomingOrder[];
   };
+  // Kept as its own block, deliberately not mixed into the fields above -
+  // those exist for a fast daily glance, this is a reporting surface, and
+  // blurring the two would make both harder to reason about.
+  monthlyFinancials: DashboardMonthlyFinancials;
 }
 
 const ACTIVE_ORDER_STATUSES = ['Pending', 'Confirmed', 'In Progress', 'Ready'];
+
+// Cash actually received; 'refund' is a real PaymentEventType but no refund
+// flow writes it yet - excluded on purpose so a future refund doesn't
+// silently inflate "money that came in this month".
+const CASH_IN_EVENT_TYPES = ['advance_received', 'balance_received'];
 
 export async function getDashboardSummary(bakerId: string): Promise<DashboardSummary> {
   // "Today" computed in IST (Asia/Kolkata) consistently with getCalendar
@@ -56,6 +73,7 @@ export async function getDashboardSummary(bakerId: string): Promise<DashboardSum
   const endOfToday = new Date(Date.UTC(todayYear, todayMonth, todayDay, 23, 59, 59, 999));
 
   const endOfCurrentMonth = new Date(Date.UTC(todayYear, todayMonth + 1, 0, 23, 59, 59, 999));
+  const startOfCurrentMonth = new Date(Date.UTC(todayYear, todayMonth, 1));
 
   const [
     todayDeliveriesCount,
@@ -64,6 +82,10 @@ export async function getDashboardSummary(bakerId: string): Promise<DashboardSum
     totalRevenueAggr,
     todayOrdersList,
     restOfMonthOrders,
+    deliveredThisMonthAggr,
+    expectedThisMonthAggr,
+    dueThisMonthAggr,
+    advanceCollectedThisMonthAggr,
   ] = await Promise.all([
     prisma.order.count({
       where: {
@@ -110,6 +132,53 @@ export async function getDashboardSummary(bakerId: string): Promise<DashboardSum
       },
       orderBy: { deliveryDate: 'asc' },
       include: { customer: { select: { name: true } } },
+    }),
+
+    // Combines deliveredThisMonth (count) and amountSoldThisMonth (sum) -
+    // both are the exact same Delivered-this-month row set, so one
+    // aggregate covers both instead of two separate queries.
+    prisma.order.aggregate({
+      _count: { id: true },
+      _sum: { totalPrice: true },
+      where: {
+        bakerId,
+        orderStatus: 'Delivered',
+        deliveryDate: { gte: startOfCurrentMonth, lte: endOfCurrentMonth },
+      },
+    }),
+
+    // Total pipeline value for the month - any non-cancelled status,
+    // delivered or not.
+    prisma.order.aggregate({
+      _sum: { totalPrice: true },
+      where: {
+        bakerId,
+        orderStatus: { not: 'Cancelled' },
+        deliveryDate: { gte: startOfCurrentMonth, lte: endOfCurrentMonth },
+      },
+    }),
+
+    prisma.order.aggregate({
+      _sum: { balanceDue: true },
+      where: {
+        bakerId,
+        balanceDue: { gt: 0 },
+        orderStatus: { not: 'Cancelled' },
+        deliveryDate: { gte: startOfCurrentMonth, lte: endOfCurrentMonth },
+      },
+    }),
+
+    // Cash-flow-in: scoped by WHEN the payment was recorded
+    // (PaymentEvent.occurredAt), deliberately NOT by the linked order's
+    // deliveryDate - a payment collected this month for a next-month
+    // delivery still counts as money in hand this month.
+    prisma.paymentEvent.aggregate({
+      _sum: { amount: true },
+      where: {
+        bakerId,
+        eventType: { in: CASH_IN_EVENT_TYPES },
+        occurredAt: { gte: startOfCurrentMonth, lte: endOfCurrentMonth },
+      },
     }),
   ]);
 
@@ -180,6 +249,19 @@ export async function getDashboardSummary(bakerId: string): Promise<DashboardSum
         totalPrice: Number(order.totalPrice),
         balanceDue: Number(order.balanceDue),
       })),
+    },
+    monthlyFinancials: {
+      deliveredThisMonth: deliveredThisMonthAggr._count.id,
+      amountSoldThisMonth: deliveredThisMonthAggr._sum.totalPrice
+        ? Number(deliveredThisMonthAggr._sum.totalPrice)
+        : 0,
+      expectedToBeSoldThisMonth: expectedThisMonthAggr._sum.totalPrice
+        ? Number(expectedThisMonthAggr._sum.totalPrice)
+        : 0,
+      dueThisMonth: dueThisMonthAggr._sum.balanceDue ? Number(dueThisMonthAggr._sum.balanceDue) : 0,
+      advanceCollectedThisMonth: advanceCollectedThisMonthAggr._sum.amount
+        ? Number(advanceCollectedThisMonthAggr._sum.amount)
+        : 0,
     },
   };
 }

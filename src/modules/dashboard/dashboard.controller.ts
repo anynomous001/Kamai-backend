@@ -49,6 +49,7 @@ export async function loadSummaryDashboard(
           balanceDue: order.balanceDue,
         })),
       },
+      monthlyFinancials: summary.monthlyFinancials,
     },
   });
 }
