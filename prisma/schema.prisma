@@ -90,6 +90,20 @@ model Baker {
   // trialEndsAt (which would mean permanent, unenforceable free access).
   trialEndsAt            DateTime? @default(dbgenerated("(now() + interval '30 days')")) @map("trial_ends_at")
   subscriptionEndsAt     DateTime? @map("subscription_ends_at")
+  // When the current PENDING attempt was created - stamped by
+  // createSubscription() itself, not the generic `updatedAt` below.
+  // Deliberately a dedicated field rather than reusing updatedAt: that
+  // field bumps on ANY write to this row (profile edit, UPI settings,
+  // etc.), and a baker whose trial hasn't expired yet can still make
+  // those other writes while PENDING (write-access.ts only blocks once
+  // trialEndsAt has passed) - reusing updatedAt would let unrelated
+  // activity indefinitely reset the abandoned-checkout clock. Read by
+  // createSubscription's PENDING guard to distinguish a fresh, still-in-
+  // flight attempt (blocked, to protect the concurrent-double-submit
+  // fix) from a stale/abandoned one older than the threshold (allowed to
+  // retry - see the 2026-08-21 audit: with no webhook ever firing for a
+  // pure checkout abandonment, this was previously a permanent dead end).
+  subscriptionPendingSince DateTime? @map("subscription_pending_since")
   nextBillingDate        DateTime? @map("next_billing_date") // preserved; currently never written by any code path (Razorpay doesn't push it), kept for the display field to keep working
   razorpayCustomerId     String?   @map("razorpay_customer_id")
   razorpaySubscriptionId String?  @unique @map("razorpay_subscription_id")

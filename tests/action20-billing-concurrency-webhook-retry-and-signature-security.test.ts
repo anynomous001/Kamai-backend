@@ -220,4 +220,73 @@ describe('Billing concurrency, webhook retry integrity, signature timing-safety'
       );
     });
   });
+
+  describe('Task 1 follow-up: time-bound PENDING guard (abandoned first-payment recovery)', () => {
+    const staleBakerId = `${TEST_PREFIX}pending-stale`;
+    const freshBakerId = `${TEST_PREFIX}pending-fresh`;
+
+    afterAll(async () => {
+      await deleteTestBakers([staleBakerId, freshBakerId]);
+      vi.restoreAllMocks();
+    });
+
+    it('a baker PENDING for over 30 minutes is treated as abandoned - createSubscription succeeds and overwrites the stale data', async () => {
+      await deleteTestBakers([staleBakerId]);
+      await prisma.baker.create({
+        data: {
+          id: staleBakerId,
+          status: 'ACTIVE',
+          subscriptionStatus: 'PENDING',
+          razorpaySubscriptionId: 'sub_test20_stale_abandoned',
+          subscriptionPendingSince: new Date(Date.now() - 60 * 60 * 1000), // 1 hour ago
+        },
+      });
+
+      const createSpy = vi.spyOn(razorpayGateway, 'createSubscription').mockResolvedValue({
+        subscriptionId: 'sub_test20_fresh_reclaim',
+        checkoutUrl: 'https://checkout.razorpay.com/v1/checkout.html',
+      });
+
+      const result = await createSubscription(staleBakerId, { plan: 'EARLY_ADOPTER' });
+      expect(result.subscriptionId).toBe('sub_test20_fresh_reclaim');
+      expect(createSpy).toHaveBeenCalledTimes(1);
+
+      const baker = await prisma.baker.findUniqueOrThrow({ where: { id: staleBakerId } });
+      expect(baker.subscriptionStatus).toBe('PENDING');
+      // The old, never-authorized subscription ID is overwritten by the
+      // fresh attempt - not preserved alongside it.
+      expect(baker.razorpaySubscriptionId).toBe('sub_test20_fresh_reclaim');
+      expect(baker.subscriptionPendingSince).not.toBeNull();
+      expect(baker.subscriptionPendingSince!.getTime()).toBeGreaterThan(Date.now() - 5000);
+    });
+
+    it('a baker PENDING for only 2 minutes is still correctly rejected - protects the concurrent-double-submit fix', async () => {
+      await deleteTestBakers([freshBakerId]);
+      await prisma.baker.create({
+        data: {
+          id: freshBakerId,
+          status: 'ACTIVE',
+          subscriptionStatus: 'PENDING',
+          razorpaySubscriptionId: 'sub_test20_still_fresh',
+          subscriptionPendingSince: new Date(Date.now() - 2 * 60 * 1000), // 2 minutes ago
+        },
+      });
+
+      const createSpy = vi.spyOn(razorpayGateway, 'createSubscription');
+
+      await expect(createSubscription(freshBakerId, { plan: 'EARLY_ADOPTER' })).rejects.toThrow(
+        'Subscription already active or pending',
+      );
+      // Rejected before ever reaching Razorpay - same guarantee the
+      // per-baker advisory lock provides for the genuinely-concurrent
+      // case (a second call racing in milliseconds behind the first has
+      // an even fresher subscriptionPendingSince, so it lands in this
+      // same rejected branch).
+      expect(createSpy).not.toHaveBeenCalled();
+
+      const baker = await prisma.baker.findUniqueOrThrow({ where: { id: freshBakerId } });
+      expect(baker.subscriptionStatus).toBe('PENDING');
+      expect(baker.razorpaySubscriptionId).toBe('sub_test20_still_fresh');
+    });
+  });
 });

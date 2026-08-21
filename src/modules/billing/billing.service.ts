@@ -3,6 +3,7 @@ import { auditService } from '../../shared/audit/index.js';
 import { cacheService } from '../../shared/cache/index.js';
 import { ConflictError, NotFoundError } from '../../shared/errors/index.js';
 import { razorpayGateway } from '../../shared/payment/razorpay.gateway.js';
+import { logger } from '../../shared/logger/index.js';
 import { env } from '../../config/env.js';
 
 import type { CreateSubscriptionBody } from './billing.schemas.js';
@@ -32,6 +33,21 @@ const SUBSCRIBER_COUNT_LOCK_KEY = 72119001;
 // lock. Any int32 works as the namespace; hashtext(bakerId) supplies the
 // per-baker half of the key.
 const PER_BAKER_SUBSCRIPTION_LOCK_NAMESPACE = 810199;
+
+// A baker whose first authorization attempt fails, is declined, or is
+// simply abandoned (closes Razorpay's checkout) gets no webhook at all -
+// Razorpay never calls back for a pure abandonment, and there is no
+// event in webhooks.service.ts's stateMap for a failed/rejected
+// authorization either way. Without a time bound, the PENDING guard
+// below would permanently block that baker from ever trying again
+// through this endpoint, with zero recovery path (confirmed in the
+// 2026-08-21 audit - previously the single most severe finding across
+// three audit sessions, since it sits directly on the revenue path).
+// 30 minutes comfortably covers a real in-progress UPI AutoPay
+// authorization (bank app switch, PIN entry, network delay) while still
+// being short enough that a genuinely abandoned attempt doesn't block a
+// baker for long.
+const PENDING_ABANDONMENT_THRESHOLD_MS = 30 * 60 * 1000;
 
 function priceForCount(activeEarlyAdopterCount: number): { planCode: 'EARLY_ADOPTER' | 'STANDARD'; price: number } {
   return activeEarlyAdopterCount < EARLY_ADOPTER_THRESHOLD
@@ -135,15 +151,44 @@ export async function createSubscription(bakerId: string, _payload: CreateSubscr
 
       const baker = await tx.baker.findUnique({
         where: { id: bakerId },
-        select: { subscriptionStatus: true },
+        select: { subscriptionStatus: true, subscriptionPendingSince: true },
       });
 
       if (!baker) {
         throw new NotFoundError('Baker not found');
       }
 
-      if (baker.subscriptionStatus === 'ACTIVE' || baker.subscriptionStatus === 'PENDING') {
+      if (baker.subscriptionStatus === 'ACTIVE') {
         throw new ConflictError('Subscription already active or pending');
+      }
+
+      if (baker.subscriptionStatus === 'PENDING') {
+        // No subscriptionPendingSince (e.g. a row from before this field
+        // existed) is treated as unknown age, not as "freshly in
+        // flight" - Infinity means it always falls through to the
+        // stale-abandoned branch below rather than trapping the baker.
+        const pendingAgeMs = baker.subscriptionPendingSince
+          ? Date.now() - baker.subscriptionPendingSince.getTime()
+          : Infinity;
+
+        if (pendingAgeMs < PENDING_ABANDONMENT_THRESHOLD_MS) {
+          // Still genuinely in flight (or this is exactly the window the
+          // per-baker advisory lock above protects: a concurrent second
+          // call for the same baker blocks on the lock until the first
+          // call's PENDING write commits, then re-reads here and lands
+          // in this branch too, since its subscriptionPendingSince is
+          // necessarily just a few milliseconds old).
+          throw new ConflictError('Subscription already active or pending');
+        }
+
+        logger.info(
+          `Reclaiming stale PENDING subscription for baker ${bakerId} (pending for ${Math.round(pendingAgeMs / 60000)} min) - treating as abandoned, allowing a fresh createSubscription attempt.`,
+        );
+        // Falls through: a fresh Razorpay subscription is created below
+        // and overwrites this baker's razorpaySubscriptionId/PlanId/
+        // subscriptionPendingSince. The old, never-authorized Razorpay
+        // subscription is left as-is at Razorpay - harmless, since no
+        // money ever moves without the customer completing authorization.
       }
 
       // Decide the price under an advisory lock, serializing the count+decide
@@ -202,6 +247,10 @@ export async function createSubscription(bakerId: string, _payload: CreateSubscr
           lockedMonthlyPrice: price,
           razorpaySubscriptionId: result.subscriptionId,
           razorpayPlanId: planId,
+          // Re-stamped on every successful call, including the stale-
+          // reclaim path above - this fresh attempt starts its own new
+          // 30-minute window.
+          subscriptionPendingSince: new Date(),
         },
       });
 
