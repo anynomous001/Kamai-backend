@@ -23,6 +23,16 @@ const STANDARD_PRICE = 199;
 // as it's used consistently and isn't reused for an unrelated lock.
 const SUBSCRIBER_COUNT_LOCK_KEY = 72119001;
 
+// Namespace for the per-baker advisory lock below, used with the
+// two-int32-key form pg_advisory_xact_lock(int, int) - a completely
+// separate Postgres lock space from the single-bigint form used by
+// SUBSCRIBER_COUNT_LOCK_KEY above. Postgres keeps these two lock spaces
+// independent regardless of the numeric values chosen, so this can never
+// collide with, or unnecessarily serialize against, the pricing-count
+// lock. Any int32 works as the namespace; hashtext(bakerId) supplies the
+// per-baker half of the key.
+const PER_BAKER_SUBSCRIPTION_LOCK_NAMESPACE = 810199;
+
 function priceForCount(activeEarlyAdopterCount: number): { planCode: 'EARLY_ADOPTER' | 'STANDARD'; price: number } {
   return activeEarlyAdopterCount < EARLY_ADOPTER_THRESHOLD
     ? { planCode: 'EARLY_ADOPTER', price: EARLY_ADOPTER_PRICE }
@@ -89,89 +99,129 @@ export async function getBillingStatus(bakerId: string) {
 // server-side, from the current concurrent-subscriber count - never from
 // the request body.
 export async function createSubscription(bakerId: string, _payload: CreateSubscriptionBody) {
-  const baker = await prisma.baker.findUnique({
-    where: { id: bakerId },
-    select: { subscriptionStatus: true },
-  });
+  const { planCode, price, subscriptionId, checkoutUrl } = await prisma.$transaction(
+    async (tx) => {
+      // Per-baker advisory lock, held for the ENTIRE operation below
+      // (guard read, pricing decision, the Razorpay API call, and the
+      // final baker.update) by acquiring it first thing inside this one
+      // transaction. Without this, two concurrent createSubscription
+      // calls for the SAME baker (double-click, client retry-before-
+      // response, two open tabs) could both pass the ACTIVE/PENDING
+      // guard before either had written PENDING, both call Razorpay's
+      // createSubscription independently, and race on the final update -
+      // silently orphaning one live Razorpay mandate that our DB stops
+      // tracking (confirmed as a real race in the 2026-08-21 audit; a
+      // sequential version of this exact symptom - two live subscription
+      // IDs for one baker - was found on a real account earlier that
+      // session). A second concurrent call now blocks on this lock until
+      // the first call's entire operation, including its Razorpay
+      // round-trip, has committed, then re-reads subscriptionStatus and
+      // correctly hits the ConflictError below instead.
+      // Postgres's two-int32-key pg_advisory_xact_lock(int, int) requires
+      // BOTH args as int4 - Prisma binds a plain JS number parameter as
+      // bigint by default, which doesn't match that overload
+      // (pg_advisory_xact_lock(bigint, integer) doesn't exist), so the
+      // namespace constant needs an explicit ::int cast. hashtext()
+      // already returns int4 natively.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${PER_BAKER_SUBSCRIPTION_LOCK_NAMESPACE}::int, hashtext(${bakerId}))`;
 
-  if (!baker) {
-    throw new NotFoundError('Baker not found');
-  }
+      const baker = await tx.baker.findUnique({
+        where: { id: bakerId },
+        select: { subscriptionStatus: true },
+      });
 
-  if (baker.subscriptionStatus === 'ACTIVE' || baker.subscriptionStatus === 'PENDING') {
-    throw new ConflictError('Subscription already active or pending');
-  }
+      if (!baker) {
+        throw new NotFoundError('Baker not found');
+      }
 
-  // Decide the price under an advisory lock, serializing the count+decide
-  // step across concurrent requests so two bakers subscribing at nearly
-  // the same moment can't both read the same "under threshold" count and
-  // both land on the discounted price when only one real slot remains.
-  //
-  // pg_advisory_xact_lock (transaction-scoped), not the session-scoped
-  // pg_advisory_lock, is required here specifically because DATABASE_URL
-  // runs through PgBouncer in transaction-pooling mode - a session-scoped
-  // lock wouldn't reliably survive PgBouncer handing the underlying
-  // connection to a different client between statements, but a
-  // transaction-scoped lock is released exactly when the transaction
-  // ends, which matches PgBouncer's per-transaction connection lifetime.
-  //
-  // Deliberately counts only ACTIVE subscribers, not PENDING: a PENDING
-  // mandate that's never authorized (baker closes the checkout page,
-  // changes their mind, etc.) must not permanently consume a slot the
-  // way the old sequence-based counter did - confirmed to happen in
-  // practice during production verification. The tradeoff is that a
-  // PENDING mandate doesn't reserve its slot either, so a burst of
-  // near-simultaneous first-time signups could momentarily all land
-  // under the threshold before any of them activate. Accepted: this is a
-  // live concurrent count that self-corrects (unlike a lifetime tally),
-  // and an occasional few-subscriber overshoot right at the threshold
-  // boundary is far less costly than routinely losing real slots to
-  // abandoned checkouts, which is the much more common case.
-  const { planCode, price } = await prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${SUBSCRIBER_COUNT_LOCK_KEY})`;
-    const activeCount = await tx.baker.count({
-      where: {
-        subscriptionStatus: 'ACTIVE',
-        lockedMonthlyPrice: EARLY_ADOPTER_PRICE,
-        excludeFromSubscriberCount: false,
-      },
-    });
-    return priceForCount(activeCount);
-  });
+      if (baker.subscriptionStatus === 'ACTIVE' || baker.subscriptionStatus === 'PENDING') {
+        throw new ConflictError('Subscription already active or pending');
+      }
 
-  const planId =
-    planCode === 'EARLY_ADOPTER' ? env.RAZORPAY_EARLY_ADOPTER_PLAN_ID : env.RAZORPAY_STANDARD_PLAN_ID;
-  if (!planId) {
-    throw new Error(`Razorpay plan ID is not configured for tier ${planCode}`);
-  }
+      // Decide the price under an advisory lock, serializing the count+decide
+      // step across concurrent requests so two bakers subscribing at nearly
+      // the same moment can't both read the same "under threshold" count and
+      // both land on the discounted price when only one real slot remains.
+      //
+      // pg_advisory_xact_lock (transaction-scoped), not the session-scoped
+      // pg_advisory_lock, is required here specifically because DATABASE_URL
+      // runs through PgBouncer in transaction-pooling mode - a session-scoped
+      // lock wouldn't reliably survive PgBouncer handing the underlying
+      // connection to a different client between statements, but a
+      // transaction-scoped lock is released exactly when the transaction
+      // ends, which matches PgBouncer's per-transaction connection lifetime.
+      //
+      // Deliberately counts only ACTIVE subscribers, not PENDING: a PENDING
+      // mandate that's never authorized (baker closes the checkout page,
+      // changes their mind, etc.) must not permanently consume a slot the
+      // way the old sequence-based counter did - confirmed to happen in
+      // practice during production verification. The tradeoff is that a
+      // PENDING mandate doesn't reserve its slot either, so a burst of
+      // near-simultaneous first-time signups could momentarily all land
+      // under the threshold before any of them activate. Accepted: this is a
+      // live concurrent count that self-corrects (unlike a lifetime tally),
+      // and an occasional few-subscriber overshoot right at the threshold
+      // boundary is far less costly than routinely losing real slots to
+      // abandoned checkouts, which is the much more common case. This
+      // lock's scope is deliberately kept narrow - just the count+decide
+      // step below - even though it now runs inside the same transaction
+      // as the per-baker lock above, rather than its own separate
+      // transaction as before.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${SUBSCRIBER_COUNT_LOCK_KEY})`;
+      const activeCount = await tx.baker.count({
+        where: {
+          subscriptionStatus: 'ACTIVE',
+          lockedMonthlyPrice: EARLY_ADOPTER_PRICE,
+          excludeFromSubscriberCount: false,
+        },
+      });
+      const { planCode, price } = priceForCount(activeCount);
 
-  const result = await razorpayGateway.createSubscription(planId, bakerId);
+      const planId =
+        planCode === 'EARLY_ADOPTER' ? env.RAZORPAY_EARLY_ADOPTER_PLAN_ID : env.RAZORPAY_STANDARD_PLAN_ID;
+      if (!planId) {
+        throw new Error(`Razorpay plan ID is not configured for tier ${planCode}`);
+      }
 
-  await prisma.baker.update({
-    where: { id: bakerId },
-    data: {
-      subscriptionStatus: 'PENDING',
-      subscriptionPlan: planCode,
-      isEarlyAdopter: planCode === 'EARLY_ADOPTER',
-      lockedMonthlyPrice: price,
-      razorpaySubscriptionId: result.subscriptionId,
-      razorpayPlanId: planId,
+      const result = await razorpayGateway.createSubscription(planId, bakerId);
+
+      await tx.baker.update({
+        where: { id: bakerId },
+        data: {
+          subscriptionStatus: 'PENDING',
+          subscriptionPlan: planCode,
+          isEarlyAdopter: planCode === 'EARLY_ADOPTER',
+          lockedMonthlyPrice: price,
+          razorpaySubscriptionId: result.subscriptionId,
+          razorpayPlanId: planId,
+        },
+      });
+
+      return { planCode, price, subscriptionId: result.subscriptionId, checkoutUrl: result.checkoutUrl };
     },
-  });
+    // Generous timeout: this transaction now holds the per-baker lock
+    // across a real Razorpay HTTP round-trip, not just local DB work, so
+    // Prisma's 5s interactive-transaction default would risk aborting a
+    // legitimate-but-slow call. maxWait is how long a second concurrent
+    // caller for the same baker will wait to even start (i.e. to acquire
+    // a connection and begin waiting on the advisory lock) before Prisma
+    // gives up client-side.
+    { timeout: 15000, maxWait: 10000 },
+  );
 
   await auditService.logEvent('SUBSCRIPTION_CREATED', bakerId, {
     plan: planCode,
     lockedMonthlyPrice: price,
-    razorpaySubscriptionId: result.subscriptionId,
+    razorpaySubscriptionId: subscriptionId,
     status: 'PENDING',
   });
 
   await cacheService.invalidateDashboardSummary(bakerId);
 
   return {
-    subscriptionId: result.subscriptionId,
+    subscriptionId,
     keyId: env.RAZORPAY_KEY_ID,
-    checkoutUrl: result.checkoutUrl || null,
+    checkoutUrl: checkoutUrl || null,
     plan: planCode,
     monthlyPrice: price,
   };
