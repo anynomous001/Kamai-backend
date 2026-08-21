@@ -1,8 +1,12 @@
+import crypto from 'crypto';
+
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { prisma } from '../src/shared/database/prisma.js';
 import { razorpayGateway } from '../src/shared/payment/razorpay.gateway.js';
+import { razorpayWebhookProcessor } from '../src/modules/webhooks/razorpay-webhook.processor.js';
 import { processWebhookEvent } from '../src/modules/webhooks/webhooks.service.js';
 import { createSubscription, getBillingStatus } from '../src/modules/billing/billing.service.js';
+import { env } from '../src/config/env.js';
 
 // All test-created baker/event ids are prefixed so cleanup can find them
 // reliably and never collide with other test files' fixtures or real data.
@@ -159,6 +163,61 @@ describe('Billing concurrency, webhook retry integrity, signature timing-safety'
     it('includes isFounderAccount in the response, reflecting the real DB value', async () => {
       const status = await getBillingStatus(bakerId);
       expect(status.isFounderAccount).toBe(true);
+    });
+  });
+
+  describe('Task 4: timing-safe webhook signature comparison', () => {
+    const payload = JSON.stringify({
+      event: 'subscription.activated',
+      payload: { subscription: { entity: { id: 'sub_test20_sig', customer_id: null } } },
+    });
+
+    // This local .env has RAZORPAY_WEBHOOK_SECRET unset (empty) - webhook
+    // signature verification is normally exercised via a mocked
+    // verifySignature (see action18), which never hits this gap. `env` is
+    // a plain mutable object (not frozen, not re-read from process.env
+    // per call), so overriding this property directly gives
+    // verifySignature() a real, known secret to check against, and
+    // restoring it afterward avoids leaking state into other test files.
+    const TEST_SECRET = 'test-webhook-secret-for-signature-verification';
+    const originalSecret = env.RAZORPAY_WEBHOOK_SECRET;
+
+    beforeAll(() => {
+      env.RAZORPAY_WEBHOOK_SECRET = TEST_SECRET;
+    });
+
+    afterAll(() => {
+      env.RAZORPAY_WEBHOOK_SECRET = originalSecret;
+    });
+
+    function validSignature(): string {
+      return crypto.createHmac('sha256', TEST_SECRET).update(payload).digest('hex');
+    }
+
+    it('accepts a genuinely valid signature', () => {
+      expect(() => razorpayWebhookProcessor.verifySignature(payload, validSignature())).not.toThrow();
+    });
+
+    it('rejects a malformed, wrong-length signature cleanly instead of crashing', () => {
+      // Previously: crypto.timingSafeEqual throws on mismatched buffer
+      // lengths, so a wrong-length header like this would have crashed
+      // the handler (an unhandled RangeError) rather than failing
+      // verification cleanly.
+      expect(() => razorpayWebhookProcessor.verifySignature(payload, 'not-a-valid-signature')).toThrow(
+        'Invalid webhook signature',
+      );
+    });
+
+    it('rejects an empty-string signature cleanly instead of crashing', () => {
+      expect(() => razorpayWebhookProcessor.verifySignature(payload, '')).toThrow('Invalid webhook signature');
+    });
+
+    it('rejects a same-length but wrong-content signature', () => {
+      const valid = validSignature();
+      const tampered = (valid[0] === '0' ? '1' : '0') + valid.slice(1);
+      expect(() => razorpayWebhookProcessor.verifySignature(payload, tampered)).toThrow(
+        'Invalid webhook signature',
+      );
     });
   });
 });
