@@ -33,6 +33,7 @@ export async function getBakerProfile(bakerId: string) {
       subscriptionStatus: true,
       trialEndsAt: true,
       nextBillingDate: true,
+      isFounderAccount: true,
     },
   });
 

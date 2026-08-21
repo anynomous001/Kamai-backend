@@ -1,14 +1,10 @@
 import type { Baker } from '@prisma/client';
 
+import { getTrialDaysRemaining } from '../../shared/utils/trial.util.js';
+
 export class BakerProfileMapper {
   static toProfileResponse(baker: Baker, logoUrl: string | null, fssaiDocumentUrl: string | null) {
-    const now = new Date();
-    let trialDaysRemaining = 0;
-
-    if (baker.trialEndsAt) {
-      const diffTime = baker.trialEndsAt.getTime() - now.getTime();
-      trialDaysRemaining = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
-    }
+    const trialDaysRemaining = getTrialDaysRemaining(baker.trialEndsAt);
 
     return {
       id: baker.id,
@@ -54,6 +50,12 @@ export class BakerProfileMapper {
         trialEndsOn: baker.trialEndsAt ? baker.trialEndsAt.toISOString() : null,
         trialDaysRemaining,
         nextBillingDate: baker.nextBillingDate ? baker.nextBillingDate.toISOString() : null,
+        // Mirrors the fix already shipped for getBillingStatus() - lets
+        // the frontend's isPaywalled check short-circuit the same way
+        // write-access.ts does server-side, instead of the two layers
+        // only agreeing by coincidence whenever subscriptionStatus
+        // happens to read ACTIVE (2026-08-21 audit).
+        isFounderAccount: baker.isFounderAccount,
       },
     };
   }

@@ -10,6 +10,7 @@ export const GetBillingStatusResponseSchema = z.object({
   lockedMonthlyPrice: z.number().nullable(),
   currentOfferPrice: z.number(),
   spotsRemaining: z.number().int(),
+  isFounderAccount: z.boolean(),
 });
 
 export const CreateSubscriptionBodySchema = z.object({
@@ -40,6 +41,7 @@ export const getBillingStatusJsonSchema = {
             lockedMonthlyPrice: { type: 'number', nullable: true },
             currentOfferPrice: { type: 'number' },
             spotsRemaining: { type: 'integer' },
+            isFounderAccount: { type: 'boolean' },
           },
         },
       },
