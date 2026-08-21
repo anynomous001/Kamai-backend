@@ -31,14 +31,30 @@ export async function processWebhookEvent(event: {
 
   try {
     await prisma.$transaction(async (tx) => {
-      // 1. Idempotency Check
+      // 1. Idempotency Check - only short-circuits on a previously
+      // SUCCESSFUL delivery of this exact eventId. A FAILED row (e.g. a
+      // transient "Baker not found" from a prior delivery attempt) is
+      // deliberately NOT treated as "already processed": checking
+      // existence alone here used to mean Razorpay's automatic retry of
+      // a genuinely failed event would hit this FAILED row, get silently
+      // short-circuited, and return 200 - permanently defeating the
+      // retry mechanism with no error and no alert (confirmed in the
+      // 2026-08-21 audit). Falling through here lets a retry actually
+      // re-attempt processing once the underlying condition (e.g. the
+      // baker row committing) has resolved.
       const existingEvent = await tx.webhookEvent.findUnique({
         where: { eventId },
       });
 
-      if (existingEvent) {
+      if (existingEvent?.status === 'SUCCESS') {
         logger.info(`Webhook event ${eventId} already processed.`);
         return; // Already processed
+      }
+
+      if (existingEvent?.status === 'FAILED') {
+        logger.info(
+          `Webhook event ${eventId} previously failed (${existingEvent.errorMessage ?? 'unknown error'}) - retrying.`,
+        );
       }
 
       // 2. Find Baker by subscription ID
@@ -100,12 +116,21 @@ export async function processWebhookEvent(event: {
         });
       }
 
-      // 5. Insert Webhook Event
-      await tx.webhookEvent.create({
-        data: {
+      // 5. Insert/Update Webhook Event - upsert, not create, since a
+      // successful retry targets a row that may already exist (in
+      // FAILED status) from a prior failed attempt at this same eventId.
+      await tx.webhookEvent.upsert({
+        where: { eventId },
+        create: {
           eventId,
           eventType,
           status: 'SUCCESS',
+        },
+        update: {
+          eventType,
+          status: 'SUCCESS',
+          errorMessage: null,
+          processedAt: new Date(),
         },
       });
 
@@ -133,16 +158,30 @@ export async function processWebhookEvent(event: {
     logger.error(`Webhook processing failed: ${msg}`);
 
     try {
-      await prisma.webhookEvent.create({
-        data: {
+      // Upsert, not create: a second or later failed attempt at the same
+      // eventId now targets a row that already exists (either FAILED
+      // from an earlier attempt, or - in the unlikely case processing
+      // failed after the transaction's own upsert already ran - SUCCESS,
+      // which this correctly overwrites back to FAILED with the real
+      // error, since that attempt did not actually complete).
+      await prisma.webhookEvent.upsert({
+        where: { eventId },
+        create: {
           eventId,
           eventType,
           status: 'FAILED',
           errorMessage: msg,
         },
+        update: {
+          eventType,
+          status: 'FAILED',
+          errorMessage: msg,
+          processedAt: new Date(),
+        },
       });
     } catch (e) {
-      // Ignore if it fails due to unique constraint (another process might have saved it)
+      // Best-effort only - never let a failure to record the failure
+      // itself mask or replace the original processing error below.
     }
 
     throw error;

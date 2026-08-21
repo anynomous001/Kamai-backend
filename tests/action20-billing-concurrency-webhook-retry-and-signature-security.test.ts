@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { prisma } from '../src/shared/database/prisma.js';
 import { razorpayGateway } from '../src/shared/payment/razorpay.gateway.js';
+import { processWebhookEvent } from '../src/modules/webhooks/webhooks.service.js';
 import { createSubscription } from '../src/modules/billing/billing.service.js';
 
 // All test-created baker/event ids are prefixed so cleanup can find them
@@ -63,6 +64,75 @@ describe('Billing concurrency, webhook retry integrity, signature timing-safety'
       const baker = await prisma.baker.findUniqueOrThrow({ where: { id: bakerId } });
       expect(baker.subscriptionStatus).toBe('PENDING');
       expect(baker.razorpaySubscriptionId).toBe('sub_mock_concurrent_1');
+    });
+  });
+
+  describe('Task 2: FAILED webhook events are retried, not permanently swallowed', () => {
+    const bakerId = `${TEST_PREFIX}webhook-retry`;
+    const subscriptionId = 'sub_test20_retry_notfound';
+    const eventId = 'evt20-retry-test';
+
+    beforeAll(async () => {
+      await deleteTestBakers([bakerId]);
+      await prisma.webhookEvent.deleteMany({ where: { eventId } });
+    });
+
+    afterAll(async () => {
+      await prisma.webhookEvent.deleteMany({ where: { eventId } });
+      await deleteTestBakers([bakerId]);
+    });
+
+    it('first delivery fails (no matching baker) and is recorded FAILED; a retry with the same eventId, once the baker exists, actually re-processes to SUCCESS', async () => {
+      // First delivery: no baker with this subscriptionId exists yet.
+      await expect(
+        processWebhookEvent({
+          eventId,
+          eventType: 'subscription.activated',
+          subscriptionId,
+          paymentId: 'pay_test20_retry',
+          amount: 14900,
+          currency: 'INR',
+        }),
+      ).rejects.toThrow('Baker not found');
+
+      const afterFirstAttempt = await prisma.webhookEvent.findUnique({ where: { eventId } });
+      expect(afterFirstAttempt?.status).toBe('FAILED');
+
+      // Underlying condition resolves - the baker row now exists,
+      // simulating a race between subscription creation and webhook
+      // delivery that has since settled.
+      await prisma.baker.create({
+        data: {
+          id: bakerId,
+          status: 'ACTIVE',
+          subscriptionStatus: 'PENDING',
+          razorpaySubscriptionId: subscriptionId,
+        },
+      });
+
+      // Razorpay's retry: same eventId, same underlying event.
+      await processWebhookEvent({
+        eventId,
+        eventType: 'subscription.activated',
+        subscriptionId,
+        paymentId: 'pay_test20_retry',
+        amount: 14900,
+        currency: 'INR',
+      });
+
+      const afterRetry = await prisma.webhookEvent.findUnique({ where: { eventId } });
+      expect(afterRetry?.status).toBe('SUCCESS');
+      expect(afterRetry?.errorMessage).toBeNull();
+
+      const baker = await prisma.baker.findUniqueOrThrow({ where: { id: bakerId } });
+      expect(baker.subscriptionStatus).toBe('ACTIVE');
+
+      // Confirms actual reprocessing happened (not just a status flip) -
+      // the billing ledger write that only runs on the real success path.
+      const billingHistory = await prisma.billingHistory.findFirst({
+        where: { subscriptionId, paymentId: 'pay_test20_retry' },
+      });
+      expect(billingHistory).not.toBeNull();
     });
   });
 });
