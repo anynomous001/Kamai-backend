@@ -8,6 +8,7 @@ import { processWebhookEvent } from '../src/modules/webhooks/webhooks.service.js
 import { createSubscription, getBillingStatus } from '../src/modules/billing/billing.service.js';
 import { getBakerProfile } from '../src/modules/baker/baker-profile.service.js';
 import { getTrialDaysRemaining } from '../src/shared/utils/trial.util.js';
+import { logger } from '../src/shared/logger/index.js';
 import { env } from '../src/config/env.js';
 
 // All test-created baker/event ids are prefixed so cleanup can find them
@@ -363,6 +364,128 @@ describe('Billing concurrency, webhook retry integrity, signature timing-safety'
       // Sanity: not just "both zero" by coincidence - a real, positive
       // shared value computed from the same trialEndsAt.
       expect(billingStatus.trialDaysRemaining).toBeGreaterThan(0);
+    });
+  });
+
+  describe('Task 2: subscription.paused / subscription.resumed, and WARN logging for unmapped events', () => {
+    // Fixed literal eventIds throughout this block - the idempotency
+    // check in webhooks.service.ts keys ONLY on eventId (not baker), so
+    // a leftover SUCCESS row from a prior run of this same test file
+    // would short-circuit these calls as "already processed" before
+    // ever touching subscriptionStatus. Clean up both directions.
+    const eventIds = [
+      'evt20-regress-0',
+      'evt20-regress-1',
+      'evt20-regress-2',
+      'evt20-regress-3',
+      'evt20-regress-4',
+      'evt20-paused',
+      'evt20-resumed',
+      'evt20-unmapped',
+    ];
+
+    beforeAll(async () => {
+      await prisma.webhookEvent.deleteMany({ where: { eventId: { in: eventIds } } });
+    });
+
+    afterAll(async () => {
+      await prisma.webhookEvent.deleteMany({ where: { eventId: { in: eventIds } } });
+      vi.restoreAllMocks();
+    });
+
+    it('the 5 originally-handled events still map to their expected status, unchanged', async () => {
+      // Five full create+process+delete cycles against the real DB in one
+      // test - past the global 30s default, well within a generous
+      // explicit one below.
+      const cases: { eventType: string; expectedStatus: string }[] = [
+        { eventType: 'subscription.activated', expectedStatus: 'ACTIVE' },
+        { eventType: 'subscription.charged', expectedStatus: 'ACTIVE' },
+        { eventType: 'subscription.halted', expectedStatus: 'PAUSED' },
+        { eventType: 'subscription.cancelled', expectedStatus: 'CANCELLED' },
+        { eventType: 'subscription.completed', expectedStatus: 'EXPIRED' },
+      ];
+
+      for (const [i, { eventType, expectedStatus }] of cases.entries()) {
+        const bakerId = `${TEST_PREFIX}webhook-regress-${i}`;
+        const subscriptionId = `sub_test20_regress_${i}`;
+        await deleteTestBakers([bakerId]);
+        await prisma.baker.create({
+          data: {
+            id: bakerId,
+            status: 'ACTIVE',
+            subscriptionStatus: 'PENDING',
+            razorpaySubscriptionId: subscriptionId,
+          },
+        });
+
+        await processWebhookEvent({ eventId: `evt20-regress-${i}`, eventType, subscriptionId });
+
+        const baker = await prisma.baker.findUniqueOrThrow({ where: { id: bakerId } });
+        expect(baker.subscriptionStatus).toBe(expectedStatus);
+
+        await deleteTestBakers([bakerId]);
+      }
+    }, 60000);
+
+    it('subscription.paused moves a baker from ACTIVE to PAUSED', async () => {
+      const bakerId = `${TEST_PREFIX}webhook-paused`;
+      const subscriptionId = 'sub_test20_paused';
+      await deleteTestBakers([bakerId]);
+      await prisma.baker.create({
+        data: { id: bakerId, status: 'ACTIVE', subscriptionStatus: 'ACTIVE', razorpaySubscriptionId: subscriptionId },
+      });
+
+      await processWebhookEvent({ eventId: 'evt20-paused', eventType: 'subscription.paused', subscriptionId });
+
+      const baker = await prisma.baker.findUniqueOrThrow({ where: { id: bakerId } });
+      expect(baker.subscriptionStatus).toBe('PAUSED');
+
+      await deleteTestBakers([bakerId]);
+    });
+
+    it('subscription.resumed moves a baker from PAUSED back to ACTIVE', async () => {
+      const bakerId = `${TEST_PREFIX}webhook-resumed`;
+      const subscriptionId = 'sub_test20_resumed';
+      await deleteTestBakers([bakerId]);
+      await prisma.baker.create({
+        data: { id: bakerId, status: 'ACTIVE', subscriptionStatus: 'PAUSED', razorpaySubscriptionId: subscriptionId },
+      });
+
+      await processWebhookEvent({ eventId: 'evt20-resumed', eventType: 'subscription.resumed', subscriptionId });
+
+      const baker = await prisma.baker.findUniqueOrThrow({ where: { id: bakerId } });
+      expect(baker.subscriptionStatus).toBe('ACTIVE');
+
+      await deleteTestBakers([bakerId]);
+    });
+
+    it('an unmapped event (subscription.updated) logs a WARN with the event name and subscriptionId, and does not change subscriptionStatus', async () => {
+      const bakerId = `${TEST_PREFIX}webhook-unmapped`;
+      const subscriptionId = 'sub_test20_unmapped';
+      await deleteTestBakers([bakerId]);
+      await prisma.baker.create({
+        data: { id: bakerId, status: 'ACTIVE', subscriptionStatus: 'ACTIVE', razorpaySubscriptionId: subscriptionId },
+      });
+
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => logger);
+
+      await processWebhookEvent({ eventId: 'evt20-unmapped', eventType: 'subscription.updated', subscriptionId });
+
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      const warnMessage = String(warnSpy.mock.calls[0]?.[0]);
+      expect(warnMessage).toContain('subscription.updated');
+      expect(warnMessage).toContain(subscriptionId);
+
+      const baker = await prisma.baker.findUniqueOrThrow({ where: { id: bakerId } });
+      expect(baker.subscriptionStatus).toBe('ACTIVE');
+
+      // Unmapped events return before the transaction/idempotency-tracking
+      // logic ever runs - no WebhookEvent row gets written for them.
+      const eventRow = await prisma.webhookEvent.findUnique({ where: { eventId: 'evt20-unmapped' } });
+      expect(eventRow).toBeNull();
+
+      warnSpy.mockRestore();
+      await deleteTestBakers([bakerId]);
     });
   });
 });

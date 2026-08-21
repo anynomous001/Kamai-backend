@@ -14,18 +14,41 @@ export async function processWebhookEvent(event: {
 }): Promise<void> {
   const { eventId, eventType, subscriptionId, customerId, paymentId, amount, currency } = event;
 
-  // Known subscription states map
+  // Known subscription states map. Razorpay's full subscription webhook
+  // vocabulary (per their docs) is 10 events: authenticated, activated,
+  // charged, completed, updated, pending, halted, paused, resumed,
+  // cancelled. Only 7 map to a status transition here - see below for
+  // why the other 3 deliberately don't.
+  //
+  // subscription.paused is a genuinely distinct event from
+  // subscription.halted, not an alias - halted is Razorpay's own
+  // auto-pause after exhausting NPCI's retry attempts on a failed debit,
+  // while paused carries its own payload schema with a
+  // pause_initiated_by field (a deliberate pause, not a failure). Both
+  // land the baker in the same PAUSED state in our model since we don't
+  // currently distinguish "why paused" beyond the audit log entry.
+  // subscription.resumed is the symmetric counterpart, landing back in
+  // ACTIVE the same way charged/activated do.
   const stateMap: Record<string, 'ACTIVE' | 'PAUSED' | 'CANCELLED' | 'EXPIRED'> = {
     'subscription.activated': 'ACTIVE',
     'subscription.charged': 'ACTIVE',
+    'subscription.resumed': 'ACTIVE',
     'subscription.halted': 'PAUSED',
+    'subscription.paused': 'PAUSED',
     'subscription.cancelled': 'CANCELLED',
     'subscription.completed': 'EXPIRED',
   };
 
   const newState = stateMap[eventType];
   if (!newState) {
-    logger.info(`Ignored unknown webhook event: ${eventType}`);
+    // subscription.authenticated/.updated/.pending are intermediate/
+    // informational events with no clear required status transition in
+    // this model - deliberately not mapped, not silently dropped either.
+    // WARN (not info) + the subscriptionId so an unhandled event -
+    // whether one of these three or a genuinely new one Razorpay adds in
+    // the future - is actually visible in logs going forward, rather
+    // than needing a code read to discover it happened at all.
+    logger.warn(`Unhandled Razorpay webhook event: ${eventType} (subscriptionId: ${subscriptionId}) - no status transition applied.`);
     return;
   }
 
@@ -138,7 +161,13 @@ export async function processWebhookEvent(event: {
       const auditActionMap: Record<string, string> = {
         'subscription.activated': 'SUBSCRIPTION_ACTIVATED',
         'subscription.charged': 'SUBSCRIPTION_RENEWED',
+        'subscription.resumed': 'SUBSCRIPTION_RESUMED',
         'subscription.halted': 'SUBSCRIPTION_PAUSED',
+        // Distinct audit action from halted's, even though both land on
+        // the same PAUSED status - keeps "deliberate pause" and
+        // "auto-paused after failed-payment retries exhausted"
+        // distinguishable in the audit trail.
+        'subscription.paused': 'SUBSCRIPTION_PAUSE_REQUESTED',
         'subscription.cancelled': 'SUBSCRIPTION_CANCELLED',
         'subscription.completed': 'SUBSCRIPTION_EXPIRED',
       };
