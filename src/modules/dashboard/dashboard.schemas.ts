@@ -221,3 +221,56 @@ export const getCalendarJsonSchema = {
     },
   },
 };
+
+// ── GET /api/dashboard/calendar/months ──
+
+export const GetCalendarMonthsOverviewQuerySchema = z.object({
+  month: z.string().regex(/^\d{4}-\d{2}$/, 'Must be YYYY-MM format').optional(),
+});
+
+export type GetCalendarMonthsOverviewQuery = z.infer<typeof GetCalendarMonthsOverviewQuerySchema>;
+
+export const getCalendarMonthsOverviewJsonSchema = {
+  description:
+    'Order counts for the 6-month window shown in the calendar month-picker strip (1 month ahead of `month`, then `month`, then 4 months behind).',
+  tags: ['Dashboard'],
+  security: [{ cookieAuth: [] }],
+  querystring: {
+    type: 'object',
+    properties: {
+      month: { type: 'string', pattern: '^\\d{4}-\\d{2}$' },
+    },
+  },
+  response: {
+    200: {
+      description: 'Successfully retrieved month-overview data',
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', default: true },
+        data: {
+          type: 'object',
+          properties: {
+            months: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  month: { type: 'string', example: '2026-09' },
+                  totalOrders: { type: 'integer', example: 7 },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    400: {
+      description: 'Validation failed for query parameters',
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', default: false },
+        error: { type: 'string' },
+      },
+    },
+  },
+};

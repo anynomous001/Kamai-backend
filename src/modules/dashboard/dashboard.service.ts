@@ -407,3 +407,49 @@ export async function getCalendar(bakerId: string, query: import('./dashboard.sc
     monthlyStats,
   };
 }
+
+export interface CalendarMonthOverviewEntry {
+  month: string; // YYYY-MM
+  totalOrders: number;
+}
+
+// Backs the month-picker strip on the calendar screen (founder's reference
+// image: "Oct 26 · 1 order | Sept 26 · 7 orders | Aug 26 · 30 orders | ...").
+// Offsets are deliberately asymmetric - 1 month ahead of centerMonth, then
+// centerMonth itself, then 4 months behind - matching that reference's
+// exact layout rather than a symmetric window.
+const MONTH_OVERVIEW_OFFSETS = [1, 0, -1, -2, -3, -4];
+
+export async function getCalendarMonthsOverview(
+  bakerId: string,
+  centerMonth: string,
+): Promise<CalendarMonthOverviewEntry[]> {
+  const [year, month] = centerMonth.split('-').map(Number);
+
+  const months = MONTH_OVERVIEW_OFFSETS.map((offset) => {
+    const d = new Date(Date.UTC(year, month - 1 + offset, 1));
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+  });
+
+  // One query covering the whole window (earliest offset to latest offset)
+  // instead of 6 separate per-month counts.
+  const rangeStart = new Date(Date.UTC(year, month - 1 + Math.min(...MONTH_OVERVIEW_OFFSETS), 1));
+  const rangeEnd = new Date(Date.UTC(year, month - 1 + Math.max(...MONTH_OVERVIEW_OFFSETS) + 1, 0, 23, 59, 59, 999));
+
+  const orders = await prisma.order.findMany({
+    where: {
+      bakerId,
+      orderStatus: { not: 'Cancelled' },
+      deliveryDate: { gte: rangeStart, lte: rangeEnd },
+    },
+    select: { deliveryDate: true },
+  });
+
+  const counts = new Map<string, number>();
+  for (const order of orders) {
+    const key = `${order.deliveryDate.getUTCFullYear()}-${String(order.deliveryDate.getUTCMonth() + 1).padStart(2, '0')}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+
+  return months.map((m) => ({ month: m, totalOrders: counts.get(m) ?? 0 }));
+}
