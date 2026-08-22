@@ -198,6 +198,15 @@ export const getCalendarJsonSchema = {
                 },
               },
             },
+            monthlyStats: {
+              type: 'object',
+              description:
+                'Aggregated over the same startDate/endDate range as days[] (accurate regardless of order volume, unlike a paginated order list).',
+              properties: {
+                delivered: { type: 'number', example: 6310, description: 'Sum of totalPrice for Delivered orders in range' },
+                estimatedTotal: { type: 'number', example: 13000, description: 'Sum of totalPrice for all non-cancelled orders in range' },
+              },
+            },
           },
         },
       },

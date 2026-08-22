@@ -339,14 +339,46 @@ export async function getCalendar(bakerId: string, query: import('./dashboard.sc
 
   const daysMap = new Map(daysArray.map((d) => [d.date, d]));
 
-  const activeOrders = await prisma.order.findMany({
-    where: {
-      bakerId,
-      deliveryDate: { gte: startDate, lte: endDate },
-      orderStatus: { not: 'Cancelled' },
-    },
-    select: { deliveryDate: true, orderStatus: true, balanceDue: true },
-  });
+  // Same delivered-amount / total-pipeline-value pair getDashboardSummary
+  // computes for "this month" (monthlyFinancials.amountSoldThisMonth /
+  // expectedToBeSoldThisMonth), but parameterized to whatever month/week
+  // the calendar is currently viewing (prev/next navigation) rather than
+  // hardcoded to the current calendar month. Aggregated in the DB, not
+  // derived from the (paginated, 100-row-capped) order list, so it stays
+  // accurate regardless of how many orders fall in the range.
+  const [activeOrders, deliveredAggr, estimatedTotalAggr] = await Promise.all([
+    prisma.order.findMany({
+      where: {
+        bakerId,
+        deliveryDate: { gte: startDate, lte: endDate },
+        orderStatus: { not: 'Cancelled' },
+      },
+      select: { deliveryDate: true, orderStatus: true, balanceDue: true },
+    }),
+
+    prisma.order.aggregate({
+      _sum: { totalPrice: true },
+      where: {
+        bakerId,
+        orderStatus: 'Delivered',
+        deliveryDate: { gte: startDate, lte: endDate },
+      },
+    }),
+
+    prisma.order.aggregate({
+      _sum: { totalPrice: true },
+      where: {
+        bakerId,
+        orderStatus: { not: 'Cancelled' },
+        deliveryDate: { gte: startDate, lte: endDate },
+      },
+    }),
+  ]);
+
+  const monthlyStats = {
+    delivered: deliveredAggr._sum.totalPrice ? Number(deliveredAggr._sum.totalPrice) : 0,
+    estimatedTotal: estimatedTotalAggr._sum.totalPrice ? Number(estimatedTotalAggr._sum.totalPrice) : 0,
+  };
 
   for (const order of activeOrders) {
     const dateKey = order.deliveryDate.toISOString().split('T')[0];
@@ -372,5 +404,6 @@ export async function getCalendar(bakerId: string, query: import('./dashboard.sc
     startDate: startDate.toISOString().split('T')[0],
     endDate: endDate.toISOString().split('T')[0],
     days: Array.from(daysMap.values()),
+    monthlyStats,
   };
 }
