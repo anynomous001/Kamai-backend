@@ -9,7 +9,7 @@ import { getISTCalendarDate } from '../src/shared/utils/ist-date.util.js';
 // created by other test files running against the shared fixture.
 const BAKER_ID = 'test-baker-dashboard27-monthly';
 
-describe('Action 27 E2E: Dashboard monthlyFinancials', () => {
+describe('Action 27 E2E: Dashboard metrics (redesigned 4-card grid)', () => {
   let app: any;
   let cookie: string;
 
@@ -28,7 +28,7 @@ describe('Action 27 E2E: Dashboard monthlyFinancials', () => {
       data: {
         id: BAKER_ID,
         phoneNumber: '+919999900027',
-        businessName: 'Monthly Financials Test Bakery',
+        businessName: 'Monthly Metrics Test Bakery',
         ownerName: 'Test Owner',
         status: 'ACTIVE',
         subscriptionStatus: 'ACTIVE',
@@ -37,8 +37,8 @@ describe('Action 27 E2E: Dashboard monthlyFinancials', () => {
     const token = await generateAccessToken({ sub: BAKER_ID, sessionId: 'test-session-27' });
     cookie = `kamai_access_token=${token}`;
 
-    // A - Delivered, day 1 of this month, fully paid.
-    const orderA = await prisma.order.create({
+    // A - Delivered, day 1 of this month.
+    await prisma.order.create({
       data: {
         displayId: 'ORD-M27-A',
         baker: { connect: { id: BAKER_ID } },
@@ -53,12 +53,9 @@ describe('Action 27 E2E: Dashboard monthlyFinancials', () => {
         paymentStatus: 'Paid',
       },
     });
-    await prisma.paymentEvent.create({
-      data: { bakerId: BAKER_ID, orderId: orderA.id, amount: 1000, eventType: 'advance_received', paymentMode: 'CASH' },
-    });
 
-    // B - Delivered, last day of this month, partially paid.
-    const orderB = await prisma.order.create({
+    // B - Delivered, last day of this month.
+    await prisma.order.create({
       data: {
         displayId: 'ORD-M27-B',
         baker: { connect: { id: BAKER_ID } },
@@ -73,12 +70,9 @@ describe('Action 27 E2E: Dashboard monthlyFinancials', () => {
         paymentStatus: 'Partially Paid',
       },
     });
-    await prisma.paymentEvent.create({
-      data: { bakerId: BAKER_ID, orderId: orderB.id, amount: 500, eventType: 'advance_received', paymentMode: 'UPI' },
-    });
 
     // C - Confirmed (not Delivered), mid this month.
-    const orderC = await prisma.order.create({
+    await prisma.order.create({
       data: {
         displayId: 'ORD-M27-C',
         baker: { connect: { id: BAKER_ID } },
@@ -93,11 +87,8 @@ describe('Action 27 E2E: Dashboard monthlyFinancials', () => {
         paymentStatus: 'Partially Paid',
       },
     });
-    await prisma.paymentEvent.create({
-      data: { bakerId: BAKER_ID, orderId: orderC.id, amount: 300, eventType: 'advance_received', paymentMode: 'CASH' },
-    });
 
-    // D - Pending, mid this month, no payment at all.
+    // D - Pending, mid this month.
     await prisma.order.create({
       data: {
         displayId: 'ORD-M27-D',
@@ -131,10 +122,9 @@ describe('Action 27 E2E: Dashboard monthlyFinancials', () => {
       },
     });
 
-    // F - Delivered, deliveryDate is LAST month, but the payment was
-    // recorded THIS month - must NOT count in any deliveryDate-scoped
-    // metric, but MUST count in advanceCollectedThisMonth (occurredAt-scoped).
-    const orderF = await prisma.order.create({
+    // F - Delivered, but deliveryDate is LAST month - must not leak into
+    // any this-month metric despite being a large amount.
+    await prisma.order.create({
       data: {
         displayId: 'ORD-M27-F',
         baker: { connect: { id: BAKER_ID } },
@@ -149,13 +139,10 @@ describe('Action 27 E2E: Dashboard monthlyFinancials', () => {
         paymentStatus: 'Paid',
       },
     });
-    await prisma.paymentEvent.create({
-      data: { bakerId: BAKER_ID, orderId: orderF.id, amount: 9999, eventType: 'advance_received', paymentMode: 'CASH' },
-    });
 
-    // G - Delivered, both deliveryDate AND payment are last month - must
-    // not leak into any metric.
-    const orderG = await prisma.order.create({
+    // G - Confirmed, deliveryDate mid LAST month - must not leak into
+    // confirmedOrdersCount/confirmedRevenue/confirmedBalanceDue.
+    await prisma.order.create({
       data: {
         displayId: 'ORD-M27-G',
         baker: { connect: { id: BAKER_ID } },
@@ -164,21 +151,62 @@ describe('Action 27 E2E: Dashboard monthlyFinancials', () => {
         deliveryType: 'pickup',
         deliveryDate: midPrevMonth,
         totalPrice: 500,
-        advancePaid: 500,
-        balanceDue: 0,
-        orderStatus: 'Delivered',
-        paymentStatus: 'Paid',
+        advancePaid: 0,
+        balanceDue: 500,
+        orderStatus: 'Confirmed',
+        paymentStatus: 'Unpaid',
       },
     });
-    await prisma.paymentEvent.create({
+
+    // Expense ledger (Investment model) - two entries this month, one last
+    // month (excluded), one soft-deleted this month (excluded).
+    await prisma.investment.create({
       data: {
-        bakerId: BAKER_ID,
-        orderId: orderG.id,
-        amount: 500,
-        eventType: 'advance_received',
-        paymentMode: 'CASH',
-        occurredAt: midPrevMonth,
-        createdAt: midPrevMonth,
+        baker: { connect: { id: BAKER_ID } },
+        purchaseDate: midThisMonth,
+        category: 'ingredients',
+        materialName: 'Flour',
+        quantity: 10,
+        unit: 'kg',
+        pricePerUnit: 120,
+        totalCost: 1200,
+      },
+    });
+    await prisma.investment.create({
+      data: {
+        baker: { connect: { id: BAKER_ID } },
+        purchaseDate: midThisMonth,
+        category: 'packaging',
+        materialName: 'Boxes',
+        quantity: 25,
+        unit: 'piece',
+        pricePerUnit: 15,
+        totalCost: 375,
+      },
+    });
+    await prisma.investment.create({
+      data: {
+        baker: { connect: { id: BAKER_ID } },
+        purchaseDate: midPrevMonth,
+        category: 'ingredients',
+        materialName: 'Sugar',
+        quantity: 20,
+        unit: 'kg',
+        pricePerUnit: 45,
+        totalCost: 900,
+      },
+    });
+    await prisma.investment.create({
+      data: {
+        baker: { connect: { id: BAKER_ID } },
+        purchaseDate: midThisMonth,
+        category: 'equipment',
+        materialName: 'Mixer (returned)',
+        quantity: 1,
+        unit: 'piece',
+        pricePerUnit: 5000,
+        totalCost: 5000,
+        deletedAt: new Date(),
       },
     });
   }, 30000);
@@ -187,7 +215,7 @@ describe('Action 27 E2E: Dashboard monthlyFinancials', () => {
     await prisma.baker.deleteMany({ where: { id: BAKER_ID } });
   });
 
-  it('computes all 5 monthlyFinancials metrics correctly, excluding Cancelled orders and last-month data', async () => {
+  it('computes all 4 dashboard metric-card figures correctly, excluding Cancelled orders, last-month data, and soft-deleted expenses', async () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/dashboard/summary',
@@ -196,32 +224,31 @@ describe('Action 27 E2E: Dashboard monthlyFinancials', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    const mf = body.data.monthlyFinancials;
+    const m = body.data.metrics;
 
-    expect(mf).toBeDefined();
-    // Existing fields untouched by this change.
-    expect(body.data.todayDeliveries).toBeDefined();
-    expect(body.data.totalRevenue).toBeDefined();
+    expect(m).toBeDefined();
 
-    // A + B are the only Delivered orders with deliveryDate this month.
-    expect(mf.deliveredThisMonth).toBe(2);
-    expect(mf.amountSoldThisMonth).toBe(3000); // 1000 + 2000
+    // Card 1 — A, B, C, D (non-cancelled, deliveryDate this month); E
+    // excluded (Cancelled), F/G excluded (deliveryDate last month).
+    expect(m.totalOrdersThisMonth).toBe(4);
+    expect(m.confirmedOrdersCount).toBe(1); // C only (G is last month)
+    expect(m.pendingOrdersCount).toBe(1); // D only
 
-    // A + B + C + D (non-cancelled, deliveryDate this month); E excluded
-    // (Cancelled); F/G excluded (deliveryDate last month).
-    expect(mf.expectedToBeSoldThisMonth).toBe(5300); // 1000 + 2000 + 1500 + 800
+    // Card 2 — confirmedRevenue = C(1500); deliveredRevenue = A+B(3000).
+    expect(m.confirmedRevenue).toBe(1500);
+    expect(m.deliveredRevenue).toBe(3000);
+    expect(m.expectedRevenueThisMonth).toBe(4500);
+    expect(m.confirmedBalanceDue).toBe(1200); // C's balanceDue only
 
-    // B(1500) + C(1200) + D(800); A has balanceDue 0; E excluded (Cancelled).
-    expect(mf.dueThisMonth).toBe(3500);
+    // Card 3 — Pending order value = D(800).
+    expect(m.pendingOrderValue).toBe(800);
 
-    // A(1000) + B(500) + C(300) recorded this month, PLUS F(9999) whose
-    // payment was recorded this month despite a last-month deliveryDate.
-    // D has no payment. E has no payment. G's payment was recorded last
-    // month, so it's excluded despite existing.
-    expect(mf.advanceCollectedThisMonth).toBe(11799);
+    // Card 4 — 1200 + 375 this month; 900 (last month) and 5000
+    // (soft-deleted) both excluded.
+    expect(m.totalInvestedThisMonth).toBe(1575);
   });
 
-  it('does not mix monthlyFinancials into the existing todaySnapshot fields', async () => {
+  it('leaves todayOrders and upcomingOrders (Priority: Bake Today / Upcoming sections) untouched by this change', async () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/dashboard/summary',
@@ -229,8 +256,14 @@ describe('Action 27 E2E: Dashboard monthlyFinancials', () => {
     });
 
     const body = JSON.parse(res.body);
-    expect(body.data.monthlyFinancials).not.toHaveProperty('todayDeliveries');
-    expect(body.data).toHaveProperty('todayDeliveries');
-    expect(body.data).toHaveProperty('monthlyFinancials');
+    expect(body.data).toHaveProperty('todayOrders');
+    expect(body.data).toHaveProperty('upcomingOrders');
+    expect(Array.isArray(body.data.todayOrders)).toBe(true);
+    // The old fields the removed cards/section used to read are gone.
+    expect(body.data).not.toHaveProperty('monthlyFinancials');
+    expect(body.data).not.toHaveProperty('todayDeliveries');
+    expect(body.data).not.toHaveProperty('activeOrders');
+    expect(body.data).not.toHaveProperty('outstandingBalance');
+    expect(body.data).not.toHaveProperty('totalRevenue');
   });
 });

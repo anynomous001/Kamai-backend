@@ -25,19 +25,27 @@ export interface DashboardUpcomingOrder {
   balanceDue: number;
 }
 
-export interface DashboardMonthlyFinancials {
-  deliveredThisMonth: number;
-  amountSoldThisMonth: number;
-  expectedToBeSoldThisMonth: number;
-  dueThisMonth: number;
-  advanceCollectedThisMonth: number;
+// Dashboard-redesign metric grid (replaces the old 4 KPI cards + "This
+// Month, In Detail" block, and the DashboardMonthlyFinancials type that
+// backed the latter). All figures scoped to the current calendar month by
+// deliveryDate, non-cancelled orders only, mirroring the month-scoping
+// convention used everywhere else on this endpoint and in the calendar.
+export interface DashboardMetrics {
+  totalOrdersThisMonth: number;
+  confirmedOrdersCount: number;
+  pendingOrdersCount: number;
+
+  expectedRevenueThisMonth: number;
+  confirmedRevenue: number;
+  deliveredRevenue: number;
+  confirmedBalanceDue: number;
+
+  pendingOrderValue: number;
+
+  totalInvestedThisMonth: number;
 }
 
 export interface DashboardSummary {
-  todayDeliveries: number;
-  activeOrders: number;
-  outstandingBalance: number;
-  totalRevenue: number;
   todayOrders: DashboardOrderSummary[];
   // Per the "Upcoming Lookahead" feature doc: no fixed lookahead window.
   // Shows the rest of the current month's (non-today) upcoming orders; if
@@ -49,18 +57,8 @@ export interface DashboardSummary {
     month: string | null;
     orders: DashboardUpcomingOrder[];
   };
-  // Kept as its own block, deliberately not mixed into the fields above -
-  // those exist for a fast daily glance, this is a reporting surface, and
-  // blurring the two would make both harder to reason about.
-  monthlyFinancials: DashboardMonthlyFinancials;
+  metrics: DashboardMetrics;
 }
-
-const ACTIVE_ORDER_STATUSES = ['Pending', 'Confirmed', 'In Progress', 'Ready'];
-
-// Cash actually received; 'refund' is a real PaymentEventType but no refund
-// flow writes it yet - excluded on purpose so a future refund doesn't
-// silently inflate "money that came in this month".
-const CASH_IN_EVENT_TYPES = ['advance_received', 'balance_received'];
 
 export async function getDashboardSummary(bakerId: string): Promise<DashboardSummary> {
   // "Today" computed in IST (Asia/Kolkata) consistently with getCalendar
@@ -75,44 +73,7 @@ export async function getDashboardSummary(bakerId: string): Promise<DashboardSum
   const endOfCurrentMonth = new Date(Date.UTC(todayYear, todayMonth + 1, 0, 23, 59, 59, 999));
   const startOfCurrentMonth = new Date(Date.UTC(todayYear, todayMonth, 1));
 
-  const [
-    todayDeliveriesCount,
-    activeOrdersCount,
-    outstandingBalanceAggr,
-    totalRevenueAggr,
-    todayOrdersList,
-    restOfMonthOrders,
-    deliveredThisMonthAggr,
-    expectedThisMonthAggr,
-    dueThisMonthAggr,
-    advanceCollectedThisMonthAggr,
-  ] = await Promise.all([
-    prisma.order.count({
-      where: {
-        bakerId,
-        deliveryDate: { gte: startOfToday, lte: endOfToday },
-        orderStatus: { not: 'Cancelled' },
-      },
-    }),
-
-    prisma.order.count({
-      where: { bakerId, orderStatus: { in: ACTIVE_ORDER_STATUSES } },
-    }),
-
-    // Outstanding balance / total revenue now both exclude Cancelled orders,
-    // matching the exclusion rule already used everywhere else (customer
-    // LTV, calendar view) — the old dashboard summary was the one place
-    // that counted a cancelled order's balance/price, which was inconsistent.
-    prisma.order.aggregate({
-      _sum: { balanceDue: true },
-      where: { bakerId, balanceDue: { gt: 0 }, orderStatus: { not: 'Cancelled' } },
-    }),
-
-    prisma.order.aggregate({
-      _sum: { totalPrice: true },
-      where: { bakerId, orderStatus: { not: 'Cancelled' } },
-    }),
-
+  const [todayOrdersList, restOfMonthOrders, monthlyOrderGroups, investedThisMonthAggr] = await Promise.all([
     prisma.order.findMany({
       where: {
         bakerId,
@@ -134,50 +95,26 @@ export async function getDashboardSummary(bakerId: string): Promise<DashboardSum
       include: { customer: { select: { name: true } } },
     }),
 
-    // Combines deliveredThisMonth (count) and amountSoldThisMonth (sum) -
-    // both are the exact same Delivered-this-month row set, so one
-    // aggregate covers both instead of two separate queries.
-    prisma.order.aggregate({
+    // Dashboard metric grid: one groupBy covers every order-status-scoped
+    // figure the 4 cards need (totals/counts/revenue/balance-due per
+    // status) instead of a separate aggregate per card.
+    prisma.order.groupBy({
+      by: ['orderStatus'],
+      where: {
+        bakerId,
+        orderStatus: { not: 'Cancelled' },
+        deliveryDate: { gte: startOfCurrentMonth, lte: endOfCurrentMonth },
+      },
       _count: { id: true },
-      _sum: { totalPrice: true },
-      where: {
-        bakerId,
-        orderStatus: 'Delivered',
-        deliveryDate: { gte: startOfCurrentMonth, lte: endOfCurrentMonth },
-      },
+      _sum: { totalPrice: true, balanceDue: true },
     }),
 
-    // Total pipeline value for the month - any non-cancelled status,
-    // delivered or not.
-    prisma.order.aggregate({
-      _sum: { totalPrice: true },
+    prisma.investment.aggregate({
+      _sum: { totalCost: true },
       where: {
         bakerId,
-        orderStatus: { not: 'Cancelled' },
-        deliveryDate: { gte: startOfCurrentMonth, lte: endOfCurrentMonth },
-      },
-    }),
-
-    prisma.order.aggregate({
-      _sum: { balanceDue: true },
-      where: {
-        bakerId,
-        balanceDue: { gt: 0 },
-        orderStatus: { not: 'Cancelled' },
-        deliveryDate: { gte: startOfCurrentMonth, lte: endOfCurrentMonth },
-      },
-    }),
-
-    // Cash-flow-in: scoped by WHEN the payment was recorded
-    // (PaymentEvent.occurredAt), deliberately NOT by the linked order's
-    // deliveryDate - a payment collected this month for a next-month
-    // delivery still counts as money in hand this month.
-    prisma.paymentEvent.aggregate({
-      _sum: { amount: true },
-      where: {
-        bakerId,
-        eventType: { in: CASH_IN_EVENT_TYPES },
-        occurredAt: { gte: startOfCurrentMonth, lte: endOfCurrentMonth },
+        deletedAt: null,
+        purchaseDate: { gte: startOfCurrentMonth, lte: endOfCurrentMonth },
       },
     }),
   ]);
@@ -220,11 +157,18 @@ export async function getDashboardSummary(bakerId: string): Promise<DashboardSum
     }
   }
 
+  const confirmedGroup = monthlyOrderGroups.find((g) => g.orderStatus === 'Confirmed');
+  const deliveredGroup = monthlyOrderGroups.find((g) => g.orderStatus === 'Delivered');
+  const pendingGroup = monthlyOrderGroups.find((g) => g.orderStatus === 'Pending');
+
+  const confirmedOrdersCount = confirmedGroup?._count.id ?? 0;
+  const pendingOrdersCount = pendingGroup?._count.id ?? 0;
+  const confirmedRevenue = confirmedGroup?._sum.totalPrice ? Number(confirmedGroup._sum.totalPrice) : 0;
+  const deliveredRevenue = deliveredGroup?._sum.totalPrice ? Number(deliveredGroup._sum.totalPrice) : 0;
+  const confirmedBalanceDue = confirmedGroup?._sum.balanceDue ? Number(confirmedGroup._sum.balanceDue) : 0;
+  const pendingOrderValue = pendingGroup?._sum.totalPrice ? Number(pendingGroup._sum.totalPrice) : 0;
+
   return {
-    todayDeliveries: todayDeliveriesCount,
-    activeOrders: activeOrdersCount,
-    outstandingBalance: outstandingBalanceAggr._sum.balanceDue ? Number(outstandingBalanceAggr._sum.balanceDue) : 0,
-    totalRevenue: totalRevenueAggr._sum.totalPrice ? Number(totalRevenueAggr._sum.totalPrice) : 0,
     todayOrders: todayOrdersList.map((order) => ({
       id: order.id,
       bakerId: order.bakerId,
@@ -250,17 +194,20 @@ export async function getDashboardSummary(bakerId: string): Promise<DashboardSum
         balanceDue: Number(order.balanceDue),
       })),
     },
-    monthlyFinancials: {
-      deliveredThisMonth: deliveredThisMonthAggr._count.id,
-      amountSoldThisMonth: deliveredThisMonthAggr._sum.totalPrice
-        ? Number(deliveredThisMonthAggr._sum.totalPrice)
-        : 0,
-      expectedToBeSoldThisMonth: expectedThisMonthAggr._sum.totalPrice
-        ? Number(expectedThisMonthAggr._sum.totalPrice)
-        : 0,
-      dueThisMonth: dueThisMonthAggr._sum.balanceDue ? Number(dueThisMonthAggr._sum.balanceDue) : 0,
-      advanceCollectedThisMonth: advanceCollectedThisMonthAggr._sum.amount
-        ? Number(advanceCollectedThisMonthAggr._sum.amount)
+    metrics: {
+      totalOrdersThisMonth: monthlyOrderGroups.reduce((sum, g) => sum + g._count.id, 0),
+      confirmedOrdersCount,
+      pendingOrdersCount,
+
+      expectedRevenueThisMonth: confirmedRevenue + deliveredRevenue,
+      confirmedRevenue,
+      deliveredRevenue,
+      confirmedBalanceDue,
+
+      pendingOrderValue,
+
+      totalInvestedThisMonth: investedThisMonthAggr._sum.totalCost
+        ? Number(investedThisMonthAggr._sum.totalCost)
         : 0,
     },
   };
@@ -339,14 +286,46 @@ export async function getCalendar(bakerId: string, query: import('./dashboard.sc
 
   const daysMap = new Map(daysArray.map((d) => [d.date, d]));
 
-  const activeOrders = await prisma.order.findMany({
-    where: {
-      bakerId,
-      deliveryDate: { gte: startDate, lte: endDate },
-      orderStatus: { not: 'Cancelled' },
-    },
-    select: { deliveryDate: true, orderStatus: true, balanceDue: true },
-  });
+  // Same delivered-amount / total-pipeline-value pair getDashboardSummary
+  // computes for "this month" (monthlyFinancials.amountSoldThisMonth /
+  // expectedToBeSoldThisMonth), but parameterized to whatever month/week
+  // the calendar is currently viewing (prev/next navigation) rather than
+  // hardcoded to the current calendar month. Aggregated in the DB, not
+  // derived from the (paginated, 100-row-capped) order list, so it stays
+  // accurate regardless of how many orders fall in the range.
+  const [activeOrders, deliveredAggr, estimatedTotalAggr] = await Promise.all([
+    prisma.order.findMany({
+      where: {
+        bakerId,
+        deliveryDate: { gte: startDate, lte: endDate },
+        orderStatus: { not: 'Cancelled' },
+      },
+      select: { deliveryDate: true, orderStatus: true, balanceDue: true },
+    }),
+
+    prisma.order.aggregate({
+      _sum: { totalPrice: true },
+      where: {
+        bakerId,
+        orderStatus: 'Delivered',
+        deliveryDate: { gte: startDate, lte: endDate },
+      },
+    }),
+
+    prisma.order.aggregate({
+      _sum: { totalPrice: true },
+      where: {
+        bakerId,
+        orderStatus: { not: 'Cancelled' },
+        deliveryDate: { gte: startDate, lte: endDate },
+      },
+    }),
+  ]);
+
+  const monthlyStats = {
+    delivered: deliveredAggr._sum.totalPrice ? Number(deliveredAggr._sum.totalPrice) : 0,
+    estimatedTotal: estimatedTotalAggr._sum.totalPrice ? Number(estimatedTotalAggr._sum.totalPrice) : 0,
+  };
 
   for (const order of activeOrders) {
     const dateKey = order.deliveryDate.toISOString().split('T')[0];
@@ -372,5 +351,52 @@ export async function getCalendar(bakerId: string, query: import('./dashboard.sc
     startDate: startDate.toISOString().split('T')[0],
     endDate: endDate.toISOString().split('T')[0],
     days: Array.from(daysMap.values()),
+    monthlyStats,
   };
+}
+
+export interface CalendarMonthOverviewEntry {
+  month: string; // YYYY-MM
+  totalOrders: number;
+}
+
+// Backs the month-picker strip on the calendar screen (founder's reference
+// image: "Oct 26 · 1 order | Sept 26 · 7 orders | Aug 26 · 30 orders | ...").
+// Offsets are deliberately asymmetric - 1 month ahead of centerMonth, then
+// centerMonth itself, then 4 months behind - matching that reference's
+// exact layout rather than a symmetric window.
+const MONTH_OVERVIEW_OFFSETS = [1, 0, -1, -2, -3, -4];
+
+export async function getCalendarMonthsOverview(
+  bakerId: string,
+  centerMonth: string,
+): Promise<CalendarMonthOverviewEntry[]> {
+  const [year, month] = centerMonth.split('-').map(Number);
+
+  const months = MONTH_OVERVIEW_OFFSETS.map((offset) => {
+    const d = new Date(Date.UTC(year, month - 1 + offset, 1));
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+  });
+
+  // One query covering the whole window (earliest offset to latest offset)
+  // instead of 6 separate per-month counts.
+  const rangeStart = new Date(Date.UTC(year, month - 1 + Math.min(...MONTH_OVERVIEW_OFFSETS), 1));
+  const rangeEnd = new Date(Date.UTC(year, month - 1 + Math.max(...MONTH_OVERVIEW_OFFSETS) + 1, 0, 23, 59, 59, 999));
+
+  const orders = await prisma.order.findMany({
+    where: {
+      bakerId,
+      orderStatus: { not: 'Cancelled' },
+      deliveryDate: { gte: rangeStart, lte: rangeEnd },
+    },
+    select: { deliveryDate: true },
+  });
+
+  const counts = new Map<string, number>();
+  for (const order of orders) {
+    const key = `${order.deliveryDate.getUTCFullYear()}-${String(order.deliveryDate.getUTCMonth() + 1).padStart(2, '0')}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+
+  return months.map((m) => ({ month: m, totalOrders: counts.get(m) ?? 0 }));
 }

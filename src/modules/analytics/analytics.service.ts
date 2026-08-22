@@ -31,9 +31,9 @@ function monthKey(year: number, monthIdx: number): string {
  * bucketed in-memory per calendar month, mirroring the calendar endpoint's
  * own single-fetch-then-bucket approach rather than one query per month.
  *
- * Revenue uses the same non-Cancelled exclusion the dashboard's totalRevenue
- * figure already uses, so a baker's current-month number here always
- * matches what they see on the Dashboard.
+ * Revenue uses the same non-Cancelled exclusion the dashboard's metrics
+ * already use, so a baker's current-month number here always matches what
+ * they see on the Dashboard.
  */
 export async function getAnalyticsSummary(bakerId: string, months: number): Promise<AnalyticsSummary> {
   const { year: currentYear, month: currentMonthIdx } = getISTCalendarDate();
