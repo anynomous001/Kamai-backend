@@ -1,7 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 
-import { loadSummaryDashboard, getCalendar } from './dashboard.controller.js';
-import { dashboardSummaryJsonSchema, getCalendarJsonSchema } from './dashboard.schemas.js';
+import { loadSummaryDashboard, getCalendar, getCalendarMonthsOverview } from './dashboard.controller.js';
+import {
+  dashboardSummaryJsonSchema,
+  getCalendarJsonSchema,
+  getCalendarMonthsOverviewJsonSchema,
+} from './dashboard.schemas.js';
 
 /**
  * Dashboard Routes
@@ -21,5 +25,10 @@ export async function dashboardRoutes(app: FastifyInstance) {
     schema: getCalendarJsonSchema,
     preHandler: [app.authenticate],
     handler: getCalendar,
+  });
+  app.get('/calendar/months', {
+    schema: getCalendarMonthsOverviewJsonSchema,
+    preHandler: [app.authenticate],
+    handler: getCalendarMonthsOverview,
   });
 }
