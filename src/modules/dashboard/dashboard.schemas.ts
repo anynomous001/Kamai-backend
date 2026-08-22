@@ -24,27 +24,30 @@ export const UpcomingOrderDtoSchema = z.object({
   balanceDue: z.number(),
 });
 
-export const MonthlyFinancialsDtoSchema = z.object({
-  deliveredThisMonth: z.number().int(),
-  amountSoldThisMonth: z.number(),
-  expectedToBeSoldThisMonth: z.number(),
-  dueThisMonth: z.number(),
-  advanceCollectedThisMonth: z.number(),
+export const DashboardMetricsDtoSchema = z.object({
+  totalOrdersThisMonth: z.number().int(),
+  confirmedOrdersCount: z.number().int(),
+  pendingOrdersCount: z.number().int(),
+
+  expectedRevenueThisMonth: z.number(),
+  confirmedRevenue: z.number(),
+  deliveredRevenue: z.number(),
+  confirmedBalanceDue: z.number(),
+
+  pendingOrderValue: z.number(),
+
+  totalInvestedThisMonth: z.number(),
 });
 
 export const DashboardSummaryResponseSchema = z.object({
   success: z.boolean(),
   data: z.object({
-    todayDeliveries: z.number().int(),
-    activeOrders: z.number().int(),
-    outstandingBalance: z.number(),
-    totalRevenue: z.number(),
     todayOrders: z.array(OrderDtoSchema),
     upcomingOrders: z.object({
       month: z.string().nullable(),
       orders: z.array(UpcomingOrderDtoSchema),
     }),
-    monthlyFinancials: MonthlyFinancialsDtoSchema,
+    metrics: DashboardMetricsDtoSchema,
   }),
 });
 
@@ -67,16 +70,23 @@ const orderJsonSchema = {
   },
 };
 
-const monthlyFinancialsJsonSchema = {
+const dashboardMetricsJsonSchema = {
   type: 'object',
   description:
-    'Reporting surface, separate from the fast-glance fields above - all figures scoped to the current calendar month by deliveryDate, except advanceCollectedThisMonth which is scoped by when the payment was actually recorded (PaymentEvent.occurredAt).',
+    'Backs the dashboard\'s 4-card metric grid. All figures scoped to the current calendar month by deliveryDate (or purchaseDate for totalInvestedThisMonth), non-cancelled orders only.',
   properties: {
-    deliveredThisMonth: { type: 'integer', example: 18, description: 'Count of Delivered orders with deliveryDate in the current month' },
-    amountSoldThisMonth: { type: 'number', example: 42000, description: 'Sum of totalPrice for those same Delivered-this-month orders' },
-    expectedToBeSoldThisMonth: { type: 'number', example: 68500, description: 'Sum of totalPrice for ALL non-cancelled orders (any status) with deliveryDate this month - total pipeline value' },
-    dueThisMonth: { type: 'number', example: 9200, description: 'Sum of balanceDue (where > 0) across non-cancelled orders with deliveryDate this month' },
-    advanceCollectedThisMonth: { type: 'number', example: 31000, description: 'Sum of PaymentEvent amounts recorded this month (cash actually received), regardless of the linked order\'s deliveryDate' },
+    totalOrdersThisMonth: { type: 'integer', example: 18, description: 'Count of all non-cancelled orders with deliveryDate this month' },
+    confirmedOrdersCount: { type: 'integer', example: 12, description: 'Of the above, count with status = Confirmed' },
+    pendingOrdersCount: { type: 'integer', example: 6, description: 'Of the above, count with status = Pending' },
+
+    expectedRevenueThisMonth: { type: 'number', example: 84000, description: 'confirmedRevenue + deliveredRevenue' },
+    confirmedRevenue: { type: 'number', example: 62000, description: 'Sum of totalPrice for Confirmed orders this month' },
+    deliveredRevenue: { type: 'number', example: 22000, description: 'Sum of totalPrice for Delivered orders this month' },
+    confirmedBalanceDue: { type: 'number', example: 7580, description: 'Sum of balanceDue for Confirmed orders this month only (not Pending or Delivered)' },
+
+    pendingOrderValue: { type: 'number', example: 22000, description: 'Sum of totalPrice for Pending orders this month' },
+
+    totalInvestedThisMonth: { type: 'number', example: 3575, description: 'Sum of Investment.totalCost (expense ledger) with purchaseDate this month, excluding soft-deleted entries' },
   },
 };
 
@@ -111,10 +121,6 @@ export const dashboardSummaryJsonSchema = {
         data: {
           type: 'object',
           properties: {
-            todayDeliveries: { type: 'integer', example: 6 },
-            activeOrders: { type: 'integer', example: 14 },
-            outstandingBalance: { type: 'number', example: 13250 },
-            totalRevenue: { type: 'number', example: 145800 },
             todayOrders: {
               type: 'array',
               items: orderJsonSchema,
@@ -131,7 +137,7 @@ export const dashboardSummaryJsonSchema = {
                 },
               },
             },
-            monthlyFinancials: monthlyFinancialsJsonSchema,
+            metrics: dashboardMetricsJsonSchema,
           },
         },
       },

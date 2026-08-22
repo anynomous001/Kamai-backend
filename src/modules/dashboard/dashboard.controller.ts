@@ -25,10 +25,6 @@ export async function loadSummaryDashboard(
   return reply.code(200).send({
     success: true,
     data: {
-      todayDeliveries: summary.todayDeliveries,
-      activeOrders: summary.activeOrders,
-      outstandingBalance: summary.outstandingBalance,
-      totalRevenue: summary.totalRevenue,
       todayOrders: summary.todayOrders.map((order) => ({
         id: order.id,
         bakerId: order.bakerId,
@@ -54,7 +50,7 @@ export async function loadSummaryDashboard(
           balanceDue: order.balanceDue,
         })),
       },
-      monthlyFinancials: summary.monthlyFinancials,
+      metrics: summary.metrics,
     },
   });
 }
