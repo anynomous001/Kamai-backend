@@ -5,12 +5,6 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    // Applied to process.env before Vitest imports ANY module (test files,
-    // setupFiles, everything) - unlike vi.stubEnv() calls inside
-    // setupFiles, which run too late to affect modules like config/env.ts
-    // that read process.env at import time via a top-level parseEnv()
-    // call. This is what actually makes the DEV_BYPASS_AUTH e2e-test
-    // pattern (see src/tests/setup.ts) work.
     env: {
       NODE_ENV: 'test',
       DEV_BYPASS_AUTH: 'true',

@@ -11,6 +11,7 @@ const ALLOWED_MIME_TYPES: Record<UploadCategory, string[]> = {
   BUSINESS_LOGO: ['image/png', 'image/jpeg', 'image/webp'],
   FSSAI_DOCUMENT: ['application/pdf', 'image/png', 'image/jpeg'],
   MENU_ITEM_PHOTO: ['image/png', 'image/jpeg', 'image/webp'],
+  INVESTMENT_RECEIPT: ['image/png', 'image/jpeg', 'image/webp'],
 };
 
 function getExtensionFromMime(mime: string): string {
@@ -24,6 +25,7 @@ function getExtensionFromMime(mime: string): string {
 function getFolderForCategory(category: UploadCategory): string {
   if (category === UploadCategory.BUSINESS_LOGO) return 'logo';
   if (category === UploadCategory.MENU_ITEM_PHOTO) return 'menu-item-photos';
+  if (category === UploadCategory.INVESTMENT_RECEIPT) return 'investment-receipts';
   return 'fssai';
 }
 
