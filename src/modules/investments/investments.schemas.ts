@@ -14,6 +14,9 @@ export const InvestmentResponseSchema = z.object({
   totalCost: z.number(),
   supplierName: z.string().nullable(),
   purchaseDate: z.string(), // YYYY-MM-DD
+  // Signed read URL, generated fresh per request from the stored
+  // receiptPhotoPath — never itself persisted. See investments.service.ts.
+  receiptPhotoUrl: z.string().nullable(),
 });
 
 // ── POST /api/investments ──
@@ -27,6 +30,11 @@ export const CreateInvestmentBodySchema = z.object({
   pricePerUnit: z.number().positive('Price per unit must be greater than zero'),
   supplierName: z.string().optional(),
   purchaseDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD format'),
+  // Storage path (not a URL) returned by POST /api/uploads/signed-url with
+  // category=INVESTMENT_RECEIPT — matches MenuItem's photoPath pattern.
+  // Verified to actually exist in storage before being saved; see
+  // investments.service.ts.
+  receiptPhotoPath: z.string().min(1).optional(),
 });
 
 export type CreateInvestmentBody = z.infer<typeof CreateInvestmentBodySchema>;
@@ -47,6 +55,7 @@ export const createInvestmentJsonSchema = {
       pricePerUnit: { type: 'number', exclusiveMinimum: 0, description: 'Amount in rupees' },
       supplierName: { type: 'string' },
       purchaseDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+      receiptPhotoPath: { type: 'string', minLength: 1, description: 'Storage path returned by POST /api/uploads/signed-url (category=INVESTMENT_RECEIPT)' },
     },
   },
   response: {
@@ -60,6 +69,7 @@ export const createInvestmentJsonSchema = {
           properties: {
             id: { type: 'string', format: 'uuid' },
             displayId: { type: 'string' },
+            receiptPhotoUrl: { type: 'string', nullable: true },
           },
         },
       },
@@ -123,6 +133,7 @@ export const getInvestmentsJsonSchema = {
                   totalCost: { type: 'number' },
                   supplierName: { type: 'string', nullable: true },
                   purchaseDate: { type: 'string' },
+                  receiptPhotoUrl: { type: 'string', nullable: true },
                 },
               },
             },
