@@ -1,6 +1,6 @@
 import { ConflictError } from '../../shared/errors/index.js';
 
-export type OrderStatusValue = 'Pending' | 'Confirmed' | 'In Progress' | 'Ready' | 'Delivered' | 'Cancelled';
+export type OrderStatusValue = 'Pending' | 'Confirmed' | 'Delivered' | 'Cancelled';
 
 export class StatusValidationService {
   /**
@@ -25,9 +25,7 @@ export class StatusValidationService {
 
     const validTransitions: Record<OrderStatusValue, OrderStatusValue[]> = {
       Pending: ['Confirmed', 'Cancelled'],
-      Confirmed: ['In Progress', 'Cancelled'],
-      'In Progress': ['Ready', 'Cancelled'],
-      Ready: ['Delivered', 'Cancelled'],
+      Confirmed: ['Delivered', 'Cancelled'],
       Delivered: [], // Immutable
       Cancelled: [], // Immutable
     };

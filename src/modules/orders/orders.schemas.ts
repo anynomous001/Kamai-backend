@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-const ORDER_STATUS_VALUES = ['Pending', 'Confirmed', 'In Progress', 'Ready', 'Delivered', 'Cancelled'] as const;
+const ORDER_STATUS_VALUES = ['Pending', 'Confirmed', 'Delivered', 'Cancelled'] as const;
 const DELIVERY_TYPE_VALUES = ['pickup', 'delivery'] as const;
 const PAYMENT_MODE_VALUES = ['CASH', 'UPI', 'CARD', 'BANK_TRANSFER'] as const;
 
