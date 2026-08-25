@@ -25,6 +25,14 @@ export const VerifyEmailOtpBodySchema = z.object({
 
 export type VerifyEmailOtpBody = z.infer<typeof VerifyEmailOtpBodySchema>;
 
+export const GoogleSignInBodySchema = z.object({
+  idToken: z
+    .string({ required_error: 'idToken is required' })
+    .min(1, 'idToken is required'),
+});
+
+export type GoogleSignInBody = z.infer<typeof GoogleSignInBodySchema>;
+
 // ── Response Shapes ───────────────────────────────────────────
 
 export const BakerProfileSchema = z.object({
@@ -160,6 +168,64 @@ export const verifyEmailOtpJsonSchema = {
         message: { type: 'string', example: 'Request validation failed' },
         errorCode: { type: 'string', example: 'VALIDATION_ERROR' },
         details: { type: 'object' },
+      },
+    },
+  },
+};
+
+export const googleSignInJsonSchema = {
+  description:
+    'Verify a Google Identity Services ID token, find-or-create the Baker by its ' +
+    'verified email (mirroring verify-email-otp for a new user), and issue the same ' +
+    'HTTP-only JWT cookies as any other login method.',
+  tags: ['Auth'],
+  body: {
+    type: 'object',
+    required: ['idToken'],
+    properties: {
+      idToken: {
+        type: 'string',
+        description: "The Google Identity Services ID token (JWT) obtained client-side.",
+      },
+    },
+  },
+  response: {
+    200: {
+      description: 'Google sign-in verified. Kamai session cookies are set.',
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+        bakerId: { type: 'string', format: 'uuid', example: 'd3b07384-d113-460a-85d1-d227446543b5' },
+        isNew: { type: 'boolean', example: false, description: 'true on first login — redirect to onboarding flow.' },
+        message: { type: 'string', example: 'Authentication successful.' },
+      },
+    },
+    401: {
+      description: 'The Google ID token is missing, invalid, expired, or its email is unverified.',
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Invalid or expired Google sign-in token.' },
+        errorCode: { type: 'string', example: 'GOOGLE_TOKEN_INVALID' },
+      },
+    },
+    422: {
+      description: 'Validation failed for request body.',
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Request validation failed' },
+        errorCode: { type: 'string', example: 'VALIDATION_ERROR' },
+        details: { type: 'object' },
+      },
+    },
+    503: {
+      description: 'Google sign-in is not configured on this deployment.',
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Google sign-in is not configured.' },
+        errorCode: { type: 'string', example: 'GOOGLE_SIGNIN_NOT_CONFIGURED' },
       },
     },
   },
