@@ -169,6 +169,14 @@ model RefreshToken {
   expiresAt DateTime
   createdAt DateTime  @default(now())
   revokedAt DateTime?
+  // Set on this row at the moment it's revoked-by-rotation, pointing at the
+  // id of the new RefreshToken row that replaced it. Lets a concurrent
+  // "loser" request (see authService.refreshSession's grace window) tell a
+  // legitimate rotation-caused revocation apart from other reasons a row
+  // might be revoked. Not a formal relation — purely an informational
+  // pointer, never queried by id-lookup in a way that needs referential
+  // integrity enforced.
+  rotatedToTokenId String?
 
   @@index([bakerId])
 }
