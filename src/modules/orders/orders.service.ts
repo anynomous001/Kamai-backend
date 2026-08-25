@@ -21,8 +21,8 @@ type PaymentStatusValue = 'Unpaid' | 'Partially Paid' | 'Paid';
  *
  * `currentOrderStatus` lets this be reused for existing orders: payment can
  * only ever PROMOTE order_status (Pending -> Confirmed), never regress an
- * order already further along the production lifecycle (In Progress/Ready/
- * Delivered) or touch a Cancelled order.
+ * order already further along the production lifecycle (Delivered) or
+ * touch a Cancelled order.
  */
 function derivePaymentState(
   totalPrice: number,
@@ -39,8 +39,6 @@ function derivePaymentState(
 
   const shouldBeAtLeastConfirmed = advancePaid > 0 || forceConfirm;
   const alreadyProgressed =
-    currentOrderStatus === 'In Progress' ||
-    currentOrderStatus === 'Ready' ||
     currentOrderStatus === 'Delivered' ||
     currentOrderStatus === 'Cancelled';
 
