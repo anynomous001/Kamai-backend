@@ -98,7 +98,7 @@ describe('Action 25: Refresh Token Rotation & Reuse Detection', () => {
     expect(activeRows[0]?.id).not.toBe(oldSessionId);
   });
 
-  it('should detect reuse of an already-rotated refresh token and revoke ALL sessions', async () => {
+  it('should detect reuse of a token revoked well beyond the 60s grace window and revoke ALL sessions', async () => {
     const auditSpy = vi.spyOn(auditService, 'logEvent');
 
     const rotatedSessionId = crypto.randomUUID();
@@ -108,14 +108,15 @@ describe('Action 25: Refresh Token Rotation & Reuse Detection', () => {
       sessionId: rotatedSessionId,
     });
 
-    // Simulate a token that was already rotated out (revokedAt set)
+    // Revoked 90s ago — comfortably beyond REUSE_GRACE_WINDOW_MS (60s), so
+    // this must still be read as a genuine replay, not a benign race.
     await prisma.refreshToken.create({
       data: {
         id: rotatedSessionId,
         tokenHash: await hashToken(rotatedRefreshToken),
         bakerId,
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-        revokedAt: new Date(Date.now() - 60 * 1000),
+        revokedAt: new Date(Date.now() - 90 * 1000),
       },
     });
 
@@ -152,6 +153,73 @@ describe('Action 25: Refresh Token Rotation & Reuse Detection', () => {
       'REFRESH_TOKEN_REUSE_DETECTED',
       bakerId,
       expect.objectContaining({ reason: 'token_already_revoked' }),
+    );
+  });
+
+  it('should treat a token revoked 45s ago (within the 60s grace window) as a benign race, not replay', async () => {
+    const auditSpy = vi.spyOn(auditService, 'logEvent');
+
+    const rotatedSessionId = crypto.randomUUID();
+    const rotatedRefreshToken = await generateRefreshToken({
+      sub: bakerId,
+      email: testEmail,
+      sessionId: rotatedSessionId,
+    });
+
+    // Revoked 45s ago — within REUSE_GRACE_WINDOW_MS (60s). This is the
+    // exact scenario the 2026-09-21 cold-start investigation surfaced: a
+    // reload/retry racing a still-in-flight refresh from a cold backend,
+    // not a stolen token. Must resolve as a fresh session, not a mass
+    // revoke.
+    await prisma.refreshToken.create({
+      data: {
+        id: rotatedSessionId,
+        tokenHash: await hashToken(rotatedRefreshToken),
+        bakerId,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        revokedAt: new Date(Date.now() - 45 * 1000),
+        rotatedToTokenId: crypto.randomUUID(),
+      },
+    });
+
+    // A second, currently-active, unrelated session for the same baker —
+    // must survive since this is not supposed to be a mass revocation.
+    const otherSessionId = crypto.randomUUID();
+    await prisma.refreshToken.create({
+      data: {
+        id: otherSessionId,
+        tokenHash: 'unrelated-active-session-hash-grace-window',
+        bakerId,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/auth/refresh',
+      cookies: {
+        kamai_refresh_token: rotatedRefreshToken,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body);
+    expect(body.success).toBe(true);
+    expect(body.bakerId).toBe(bakerId);
+
+    // No mass revocation: the unrelated session must still be active.
+    const otherRecord = await prisma.refreshToken.findUnique({ where: { id: otherSessionId } });
+    expect(otherRecord?.revokedAt).toBeNull();
+
+    expect(auditSpy).toHaveBeenCalledWith(
+      'REFRESH_TOKEN_RACE_RESOLVED',
+      bakerId,
+      expect.objectContaining({ losingSessionId: rotatedSessionId }),
+    );
+    expect(auditSpy).not.toHaveBeenCalledWith(
+      'REFRESH_TOKEN_REUSE_DETECTED',
+      expect.anything(),
+      expect.anything(),
     );
   });
 
@@ -199,6 +267,87 @@ describe('Action 25: Refresh Token Rotation & Reuse Detection', () => {
     // Natural expiry must NOT trigger a mass revoke of other sessions
     const otherRecord = await prisma.refreshToken.findUnique({ where: { id: otherSessionId } });
     expect(otherRecord?.revokedAt).toBeNull();
+  });
+
+  it('should let two concurrent refresh calls with the same token both succeed, without mass-revoking or flagging reuse', async () => {
+    const auditSpy = vi.spyOn(auditService, 'logEvent');
+
+    const sessionId = crypto.randomUUID();
+    const refreshToken = await generateRefreshToken({
+      sub: bakerId,
+      email: testEmail,
+      sessionId,
+    });
+
+    await prisma.refreshToken.create({
+      data: {
+        id: sessionId,
+        tokenHash: await hashToken(refreshToken),
+        bakerId,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      },
+    });
+
+    // Two near-simultaneous requests carrying the exact same refresh
+    // cookie — the scenario a mobile cold-launch racing a still-in-flight
+    // request (or two open tabs) produces in the wild.
+    const [responseA, responseB] = await Promise.all([
+      app.inject({
+        method: 'POST',
+        url: '/api/auth/refresh',
+        cookies: { kamai_refresh_token: refreshToken },
+      }),
+      app.inject({
+        method: 'POST',
+        url: '/api/auth/refresh',
+        cookies: { kamai_refresh_token: refreshToken },
+      }),
+    ]);
+
+    // Neither caller sees a failure.
+    expect(responseA.statusCode).toBe(200);
+    expect(responseB.statusCode).toBe(200);
+
+    for (const res of [responseA, responseB]) {
+      const body = JSON.parse(res.body);
+      expect(body.success).toBe(true);
+      expect(body.bakerId).toBe(bakerId);
+
+      const cookies = res.headers['set-cookie'];
+      expect(cookies).toBeDefined();
+      const cookieStr = Array.isArray(cookies) ? cookies.join(';') : cookies;
+      expect(cookieStr).toContain('kamai_access_token=');
+      expect(cookieStr).toContain('kamai_refresh_token=');
+    }
+
+    // No mass revocation: the original row is gone (rotated/consumed), but
+    // both concurrent callers ended up with their own independent, active
+    // session — neither wiped the other out.
+    const activeRows = await prisma.refreshToken.findMany({
+      where: { bakerId, revokedAt: null },
+    });
+    expect(activeRows).toHaveLength(2);
+
+    const originalRow = await prisma.refreshToken.findUnique({ where: { id: sessionId } });
+    expect(originalRow?.revokedAt).not.toBeNull();
+
+    // The winner rotated normally; the loser's race was resolved as
+    // benign. Reuse detection must NOT have fired for this.
+    expect(auditSpy).toHaveBeenCalledWith(
+      'REFRESH_TOKEN_ROTATED',
+      bakerId,
+      expect.objectContaining({ previousSessionId: sessionId }),
+    );
+    expect(auditSpy).toHaveBeenCalledWith(
+      'REFRESH_TOKEN_RACE_RESOLVED',
+      bakerId,
+      expect.objectContaining({ losingSessionId: sessionId }),
+    );
+    expect(auditSpy).not.toHaveBeenCalledWith(
+      'REFRESH_TOKEN_REUSE_DETECTED',
+      expect.anything(),
+      expect.anything(),
+    );
   });
 
   it('should return 401 when the refresh token cookie is missing', async () => {

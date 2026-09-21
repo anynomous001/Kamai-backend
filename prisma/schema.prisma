@@ -169,6 +169,14 @@ model RefreshToken {
   expiresAt DateTime
   createdAt DateTime  @default(now())
   revokedAt DateTime?
+  // Set on this row at the moment it's revoked-by-rotation, pointing at the
+  // id of the new RefreshToken row that replaced it. Lets a concurrent
+  // "loser" request (see authService.refreshSession's grace window) tell a
+  // legitimate rotation-caused revocation apart from other reasons a row
+  // might be revoked. Not a formal relation — purely an informational
+  // pointer, never queried by id-lookup in a way that needs referential
+  // integrity enforced.
+  rotatedToTokenId String?
 
   @@index([bakerId])
 }
@@ -322,6 +330,13 @@ model Investment {
   pricePerUnit Decimal @map("price_per_unit") @db.Decimal(10, 2)
   totalCost    Decimal @map("total_cost") @db.Decimal(10, 2) // server-computed: quantity * pricePerUnit
   supplierName String? @map("supplier_name")
+
+  // Storage path (not a URL) from POST /api/uploads/signed-url
+  // (category=INVESTMENT_RECEIPT) — matches MenuItem.photoPath /
+  // Baker.logoPath: the bucket is private, so a signed read URL is
+  // generated fresh on every GET rather than stored. See
+  // investments.service.ts.
+  receiptPhotoPath String? @map("receipt_photo_path")
 
   deletedAt DateTime? @map("deleted_at") // soft delete, preserved
 

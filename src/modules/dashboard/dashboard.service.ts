@@ -276,8 +276,6 @@ export async function getCalendar(bakerId: string, query: import('./dashboard.sc
       totalOrders: 0,
       pending: 0,
       confirmed: 0,
-      inProgress: 0,
-      ready: 0,
       delivered: 0,
       outstandingBalance: 0,
     });
@@ -336,8 +334,6 @@ export async function getCalendar(bakerId: string, query: import('./dashboard.sc
 
     if (order.orderStatus === 'Pending') day.pending++;
     else if (order.orderStatus === 'Confirmed') day.confirmed++;
-    else if (order.orderStatus === 'In Progress') day.inProgress++;
-    else if (order.orderStatus === 'Ready') day.ready++;
     else if (order.orderStatus === 'Delivered') day.delivered++;
 
     const balanceDue = Number(order.balanceDue);

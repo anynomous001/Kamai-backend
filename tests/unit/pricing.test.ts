@@ -8,14 +8,8 @@ describe('Unit Tests: Pricing & Status validation', () => {
       expect(() => statusValidationService.assertValidTransition('Pending', 'Confirmed')).not.toThrow();
       expect(() => statusValidationService.assertValidTransition('Pending', 'Cancelled')).not.toThrow();
 
-      expect(() => statusValidationService.assertValidTransition('Confirmed', 'In Progress')).not.toThrow();
+      expect(() => statusValidationService.assertValidTransition('Confirmed', 'Delivered')).not.toThrow();
       expect(() => statusValidationService.assertValidTransition('Confirmed', 'Cancelled')).not.toThrow();
-
-      expect(() => statusValidationService.assertValidTransition('In Progress', 'Ready')).not.toThrow();
-      expect(() => statusValidationService.assertValidTransition('In Progress', 'Cancelled')).not.toThrow();
-
-      expect(() => statusValidationService.assertValidTransition('Ready', 'Delivered')).not.toThrow();
-      expect(() => statusValidationService.assertValidTransition('Ready', 'Cancelled')).not.toThrow();
     });
 
     it('should prevent transitions into immutable status states', () => {
@@ -29,8 +23,7 @@ describe('Unit Tests: Pricing & Status validation', () => {
     });
 
     it('should throw ConflictError for illegal non-linear status skips', () => {
-      expect(() => statusValidationService.assertValidTransition('Pending', 'Ready')).toThrow(ConflictError);
-      expect(() => statusValidationService.assertValidTransition('Confirmed', 'Delivered')).toThrow(ConflictError);
+      expect(() => statusValidationService.assertValidTransition('Pending', 'Delivered')).toThrow(ConflictError);
     });
   });
 

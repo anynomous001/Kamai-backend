@@ -5,7 +5,7 @@ import { auditService } from '../../shared/audit/index.js';
 import { env } from '../../config/env.js';
 
 import * as authService from './auth.service.js';
-import { SendEmailOtpBodySchema, VerifyEmailOtpBodySchema } from './auth.schemas.js';
+import { SendEmailOtpBodySchema, VerifyEmailOtpBodySchema, GoogleSignInBodySchema } from './auth.schemas.js';
 
 // ── Cookie Config ─────────────────────────────────────────────
 
@@ -95,6 +95,44 @@ export async function verifyEmailOtp(
   const { baker, accessToken, refreshToken, isNew } = await authService.verifyEmailOtp(email, otp);
 
   // Set HttpOnly Cookies
+  setSessionCookies(reply, { accessToken, refreshToken });
+
+  return reply.code(200).send({
+    success: true,
+    bakerId: baker.id,
+    isNew,
+    message: 'Authentication successful.',
+  });
+}
+
+/**
+ * POST /api/auth/google
+ *
+ * Second, additive login method alongside email OTP (Baker Operations
+ * only) — verifies a Google Identity Services ID token server-side and
+ * issues the exact same session cookies verify-email-otp does, via the
+ * same authService.createSession choke point. Response shape matches
+ * verify-email-otp's (`bakerId`, `isNew`, `message`) so the frontend's
+ * existing post-login routing needs no new branch.
+ */
+export async function googleSignIn(
+  req: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  const parseResult = GoogleSignInBodySchema.safeParse(req.body);
+
+  if (!parseResult.success) {
+    throw new ValidationError('Request validation failed', {
+      errors: parseResult.error.errors.map((e) => ({
+        field: e.path.join('.'),
+        message: e.message,
+      })),
+    });
+  }
+
+  const { idToken } = parseResult.data;
+  const { baker, accessToken, refreshToken, isNew } = await authService.signInWithGoogle(idToken);
+
   setSessionCookies(reply, { accessToken, refreshToken });
 
   return reply.code(200).send({

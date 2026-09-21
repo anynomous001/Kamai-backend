@@ -28,6 +28,19 @@ const envSchema = z.object({
   // Support
   SUPPORT_WHATSAPP_NUMBER: z.string().optional(),
 
+  // Google Sign-In (Baker Operations only) — verifies Identity Services ID
+  // tokens against Google's public JWKS; audience-checked against this. No
+  // GOOGLE_CLIENT_SECRET needed — ID-token verification is a public-key
+  // check, unlike an OAuth code exchange. Optional (not `.min(1)` like
+  // JWT_SECRET) rather than boot-blocking: these credentials don't exist
+  // in any environment yet (real Google Cloud Console OAuth client, to be
+  // provisioned separately) — mirrors SUPPORT_WHATSAPP_NUMBER's pattern of
+  // an optional integration credential that 503s at the point of use
+  // (ServiceUnavailableError, 'GOOGLE_SIGNIN_NOT_CONFIGURED') rather than
+  // one that would otherwise take down the entire app/test suite the
+  // moment this code merges, before the real value exists anywhere.
+  GOOGLE_CLIENT_ID: z.string().optional(),
+
   // JWT
   JWT_SECRET: z
     .string()

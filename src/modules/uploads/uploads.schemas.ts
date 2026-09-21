@@ -3,6 +3,7 @@ export enum UploadCategory {
   BUSINESS_LOGO = 'BUSINESS_LOGO',
   FSSAI_DOCUMENT = 'FSSAI_DOCUMENT',
   MENU_ITEM_PHOTO = 'MENU_ITEM_PHOTO',
+  INVESTMENT_RECEIPT = 'INVESTMENT_RECEIPT',
 }
 
 export const GenerateUploadUrlBodySchema = z.object({
