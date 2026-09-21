@@ -226,7 +226,16 @@ export interface RefreshSessionResult {
 // cold-launch racing a still-in-flight request from the instance it just
 // replaced) rather than theft. Genuine replay attacks show up long after
 // the legitimate rotation, not milliseconds after it.
-const REUSE_GRACE_WINDOW_MS = 10_000;
+//
+// Widened from 10s to 60s after the 2026-09-21 cold-start investigation:
+// the frontend's checkSession()/refresh chain can legitimately take 30s+
+// to complete against a cold Render instance, plus a client-side retry —
+// comfortably exceeding the old 10s window and getting misread as
+// theft/replay on a perfectly normal user. 60s covers one full cold-start
+// cycle (~32s measured) plus the frontend's 12s request timeout and one
+// retry, while still being far too short for a real stolen-token replay
+// (which shows up minutes/hours later, not within a single page load).
+const REUSE_GRACE_WINDOW_MS = 60_000;
 
 /**
  * Exchanges a valid refresh token for a brand-new access + refresh token
